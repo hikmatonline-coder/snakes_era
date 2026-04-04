@@ -1,0 +1,129 @@
+{
+  "project_info": {
+    "project_number": "1050452995148",
+    "project_id": "quantxgame",
+    "storage_bucket": "quantxgame.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:1050452995148:android:fd6388a8c3d9c7668b18e9",
+        "android_client_info": {
+          "package_name": "com.musalleh.quant_x_games"
+        }
+      },
+      "oauth_client": [
+        {
+          "client_id": "1050452995148-ek91elj0pilfaucdspmc92br5j6gh1ck.apps.googleusercontent.com",
+          "client_type": 1,
+          "android_info": {
+            "package_name": "com.musalleh.quant_x_games",
+            "certificate_hash": "2055bd938eac7ba74a5aca6f9bdf60a5b1a639eb"
+          }
+        },
+        {
+          "client_id": "1050452995148-ofbb4ibk04rn4m46v5f3al0s1igr87s2.apps.googleusercontent.com",
+          "client_type": 1,
+          "android_info": {
+            "package_name": "com.musalleh.quant_x_games",
+            "certificate_hash": "691d0aea42456d4df5e441117474773842a64463"
+          }
+        },
+        {
+          "client_id": "1050452995148-g62r49oru3ojnutjkno7p7g1ggndunc8.apps.googleusercontent.com",
+          "client_type": 3
+        }
+      ],
+      "api_key": [
+        {
+          "current_key": "AIzaSyDdWLcEHHp3EJgIe-_Qoz3L88Nqkc_q8kA"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": [
+            {
+              "client_id": "1050452995148-g62r49oru3ojnutjkno7p7g1ggndunc8.apps.googleusercontent.com",
+              "client_type": 3
+            }
+          ]
+        }
+      }
+    },
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:1050452995148:android:803a040bf468ac1f8b18e9",
+        "android_client_info": {
+          "package_name": "com.musalleh.snake_io"
+        }
+      },
+      "oauth_client": [
+        {
+          "client_id": "1050452995148-dojmh7v856tlkpli3u1r03mne0dkcpm3.apps.googleusercontent.com",
+          "client_type": 1,
+          "android_info": {
+            "package_name": "com.musalleh.snake_io",
+            "certificate_hash": "90c7698054d94f7ce07d2c40da400459771c1107"
+          }
+        },
+        {
+          "client_id": "1050452995148-qi73ol1je70n5r35tn6jdqnfe5pbe28r.apps.googleusercontent.com",
+          "client_type": 1,
+          "android_info": {
+            "package_name": "com.musalleh.snake_io",
+            "certificate_hash": "2055bd938eac7ba74a5aca6f9bdf60a5b1a639eb"
+          }
+        },
+        {
+          "client_id": "1050452995148-g62r49oru3ojnutjkno7p7g1ggndunc8.apps.googleusercontent.com",
+          "client_type": 3
+        }
+      ],
+      "api_key": [
+        {
+          "current_key": "AIzaSyDdWLcEHHp3EJgIe-_Qoz3L88Nqkc_q8kA"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": [
+            {
+              "client_id": "1050452995148-g62r49oru3ojnutjkno7p7g1ggndunc8.apps.googleusercontent.com",
+              "client_type": 3
+            }
+          ]
+        }
+      }
+    },
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:1050452995148:android:366c257b335a94c28b18e9",
+        "android_client_info": {
+          "package_name": "com.musalleh.snakes_era"
+        }
+      },
+      "oauth_client": [
+        {
+          "client_id": "1050452995148-g62r49oru3ojnutjkno7p7g1ggndunc8.apps.googleusercontent.com",
+          "client_type": 3
+        }
+      ],
+      "api_key": [
+        {
+          "current_key": "AIzaSyDdWLcEHHp3EJgIe-_Qoz3L88Nqkc_q8kA"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": [
+            {
+              "client_id": "1050452995148-g62r49oru3ojnutjkno7p7g1ggndunc8.apps.googleusercontent.com",
+              "client_type": 3
+            }
+          ]
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
