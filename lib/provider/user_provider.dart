@@ -4,12 +4,13 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
+import 'package:snakes_era/core/constants.dart';
 
 class UserProvider extends ChangeNotifier {
   final _storage = const FlutterSecureStorage();
 
-  int _coins = 100;
-  int _powerUps = 10;
+  int _coins = AppConstants.coins;
+  int _powerUps = AppConstants.powerUps;
 
   int get coins => _coins;
   int get powerUps => _powerUps;

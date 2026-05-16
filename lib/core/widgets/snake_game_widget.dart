@@ -7,11 +7,11 @@ enum NPCType { beginner, noob, pro, legend }
 
 class Food {
   Offset pos;
-  int size;
-  Color color;
-  bool isLoot; // Add this to identify snake remains
+  final int type; // Add this if it is missing!
+  final Color color;
+  final bool isLoot;
 
-  Food(this.pos, this.size, this.color, {this.isLoot = false});
+  Food(this.pos, this.type, this.color, {this.isLoot = false});
 }
 
 class NPCSnake {
@@ -125,7 +125,7 @@ class NPCSnake {
         if (targetFoodIndex != null) {
           targetA = (foods[targetFoodIndex!].pos - pos).direction;
           // Legend/Pro bots boost toward large food
-          if (foods[targetFoodIndex!].size > 0 && rank == NPCType.legend) isBoosting = true;
+          if (foods[targetFoodIndex!].type > 0 && rank == NPCType.legend) isBoosting = true;
         }
       } else {
         // CIRCULAR ROTATION (Wandering)

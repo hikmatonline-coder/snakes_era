@@ -58,6 +58,8 @@ class AppConstants {
   /// ------------------------ APP INTS ------------------------
   // Game Configs
   static const int maxLives = 7;
+  static const int coins = 100;
+  static const int powerUps = 10;
   static const int lifeRegenSeconds = 300; // 5 minutes
   static const int adCooldownSeconds = 120; // 2 minutes
   static const int freeSpinCooldownHours = 3;

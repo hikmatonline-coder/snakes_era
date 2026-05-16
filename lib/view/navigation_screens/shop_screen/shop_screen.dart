@@ -1,10 +1,10 @@
-import 'dart:math';
 import 'dart:ui';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../../../core/constants.dart';
 import '../../../core/painters/home_snake_painter.dart';
 import '../../../model/snake_skin_model.dart';
+import '../../../provider/ads_provider.dart';
 import '../../../provider/life_provider.dart';
 import '../../../provider/user_provider.dart';
 
@@ -17,18 +17,13 @@ class ShopScreen extends StatefulWidget {
 
 class _ShopScreenState extends State<ShopScreen> {
 
-  // Track open states for the 3 chests
-  bool _isSimpleOpen = false;
-  bool _isEpicOpen = false;
-  bool _isLegendaryOpen = false;
-
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final colorScheme = theme.colorScheme;
     final user = Provider.of<UserProvider>(context);
     final life = Provider.of<LifeProvider>(context);
-    // final adProv = Provider.of<AdProvider>(context);
+    final adProv = Provider.of<AdProvider>(context);
 
     return Scaffold(
       backgroundColor: colorScheme.surface,
@@ -36,20 +31,13 @@ class _ShopScreenState extends State<ShopScreen> {
         padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 24),
         children: [
           // // --- Section 1: Daily Missions ---
-          // _section(context, "DAILY MISSIONS"),
-          // const SizedBox(height: 12),
-          // _missionCard(context, user, adProv, "Quick Pulse", 3, 20, "m1"),
-          // _missionCard(context, user, adProv, "Game Session", 10, 50, "m2"),
-          // _missionCard(context, user, adProv, "Elite Endurance", 20, 80, "m3"),
+          _section(context, "DAILY MISSIONS"),
+          const SizedBox(height: 12),
+          _missionCard(context, user, adProv, "Quick Pulse", 3, 20, "m1"),
+          _missionCard(context, user, adProv, "Game Session", 10, 50, "m2"),
+          _missionCard(context, user, adProv, "Elite Endurance", 20, 80, "m3"),
 
           const SizedBox(height: 32),
-
-          // --- Section 2: Treasure Vault ---
-          // _section(context, "TREASURE VAULT"),
-          // const SizedBox(height: 12),
-          // _buildChestRow(context, user, adProv),
-          //
-          // const SizedBox(height: 32),
 
           // --- Section 3: Resource Exchange ---
           _section(context, "RESOURCE EXCHANGE"),
@@ -121,115 +109,127 @@ class _ShopScreenState extends State<ShopScreen> {
     );
   }
 
-  // // --- Mission Card Widget ---
-  // Widget _missionCard(BuildContext context, UserProvider user, AdProvider adProv, String title, int minutes, int reward, String id) {
-  //   final colorScheme = Theme.of(context).colorScheme;
-  //   final isDark = themeIsDark(context);
-  //   double progress = (user.totalSecondsPlayed / (minutes * 60)).clamp(0.0, 1.0);
-  //   bool isReady = progress >= 1.0;
-  //
-  //   return Container(
-  //     margin: const EdgeInsets.only(bottom: 16),
-  //     decoration: BoxDecoration(
-  //       borderRadius: BorderRadius.circular(24),
-  //       color: isDark ? Colors.white.withOpacity(0.05) : colorScheme.primary.withOpacity(0.05),
-  //       border: Border.all(
-  //         color: isReady ? AppConstants.deepPurpleColor : colorScheme.outlineVariant.withOpacity(0.5),
-  //         width: isReady ? 2 : 1,
-  //       ),
-  //     ),
-  //     child: ClipRRect(
-  //       borderRadius: BorderRadius.circular(24),
-  //       child: BackdropFilter(
-  //         filter: ImageFilter.blur(sigmaX: 10, sigmaY: 10),
-  //         child: Padding(
-  //           padding: const EdgeInsets.all(16),
-  //           child: Row(
-  //             children: [
-  //               _buildProgressCircle(progress, colorScheme),
-  //               const SizedBox(width: 16),
-  //               Expanded(
-  //                 child: Column(
-  //                   crossAxisAlignment: CrossAxisAlignment.start,
-  //                   children: [
-  //                     Text(title, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
-  //                     Text("+$reward COINS", style: TextStyle(color: colorScheme.primary, fontWeight: FontWeight.w900, fontSize: 12)),
-  //                   ],
-  //                 ),
-  //               ),
-  //               _buildClaimButton(context, user, adProv, id, isReady, reward),
-  //             ],
-  //           ),
-  //         ),
-  //       ),
-  //     ),
-  //   );
-  // }
+  // --- Mission Card Widget ---
+  Widget _missionCard(BuildContext context, UserProvider user, AdProvider adProv, String title, int minutes, int reward, String id) {
+    final colorScheme = Theme.of(context).colorScheme;
+    final isDark = themeIsDark(context);
+    double progress = (user.totalSecondsPlayed / (minutes * 60)).clamp(0.0, 1.0);
+    bool isReady = progress >= 1.0;
 
-  // Widget _buildProgressCircle(double progress, ColorScheme colorScheme) {
-  //   bool isReady = progress >= 1.0;
-  //   return Stack(
-  //     alignment: Alignment.center,
-  //     children: [
-  //       SizedBox(
-  //         width: 42,
-  //         height: 42,
-  //         child: CircularProgressIndicator(
-  //           value: progress,
-  //           strokeWidth: 4,
-  //           backgroundColor: colorScheme.outlineVariant.withOpacity(0.2),
-  //           color: isReady ? Colors.greenAccent : colorScheme.primary,
-  //         ),
-  //       ),
-  //       Icon(
-  //         isReady ? Icons.check : Icons.access_time_filled,
-  //         size: 18,
-  //         color: isReady ? Colors.greenAccent : colorScheme.onSurfaceVariant,
-  //       ),
-  //     ],
-  //   );
-  // }
-  //
-  // Widget _buildClaimButton(BuildContext context, UserProvider user, AdProvider adProv, String id, bool isReady, int reward) {
-  //   final isClaimed = user.isRewardClaimed(id);
-  //   final colorScheme = Theme.of(context).colorScheme;
-  //
-  //   // Logic: Is the mission done, not claimed, AND is an ad actually ready?
-  //   bool adIsReady = adProv.isRewardedReady;
-  //   bool canClick = isReady && !isClaimed && adIsReady;
-  //   bool isWaitingForAd = isReady && !isClaimed && !adIsReady;
-  //
-  //   return ElevatedButton(
-  //     onPressed: canClick
-  //         ? () async {
-  //       bool success = await adProv.showRewarded();
-  //       if (success) {
-  //         user.claimTimeReward(id, reward);
-  //         _showSuccessDialog(context, Colors.greenAccent);
-  //       }
-  //     }
-  //         : null,
-  //     style: ElevatedButton.styleFrom(
-  //       backgroundColor: isClaimed ? Colors.transparent : (canClick ? AppConstants.deepPurpleColor : colorScheme.surfaceContainer),
-  //       foregroundColor: isClaimed ? colorScheme.onSurface : colorScheme.onPrimary,
-  //       elevation: canClick ? 4 : 0,
-  //       shape: RoundedRectangleBorder(
-  //         borderRadius: BorderRadius.circular(12),
-  //         side: isClaimed ? BorderSide(color: colorScheme.outlineVariant) : BorderSide.none,
-  //       ),
-  //     ),
-  //     child: isWaitingForAd
-  //         ? SizedBox(
-  //       width: 18,
-  //       height: 18,
-  //       child: CircularProgressIndicator(
-  //         strokeWidth: 2,
-  //         color: colorScheme.primary,
-  //       ),
-  //     )
-  //         : Text(isClaimed ? "DONE" : (adProv.secondsRemaining > 0 ? "${adProv.secondsRemaining}s" : "CLAIM")),
-  //   );
-  // }
+    return Container(
+      margin: const EdgeInsets.only(bottom: 16),
+      decoration: BoxDecoration(
+        borderRadius: BorderRadius.circular(24),
+        color: isDark ? Colors.white.withOpacity(0.05) : colorScheme.primary.withOpacity(0.05),
+        border: Border.all(
+          color: isReady ? AppConstants.deepPurpleColor : colorScheme.outlineVariant.withOpacity(0.5),
+          width: isReady ? 2 : 1,
+        ),
+      ),
+      child: ClipRRect(
+        borderRadius: BorderRadius.circular(24),
+        child: BackdropFilter(
+          filter: ImageFilter.blur(sigmaX: 10, sigmaY: 10),
+          child: Padding(
+            padding: const EdgeInsets.all(16),
+            child: Row(
+              children: [
+                _buildProgressCircle(progress, colorScheme),
+                const SizedBox(width: 16),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(title, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
+                      Text("+$reward COINS", style: TextStyle(color: colorScheme.primary, fontWeight: FontWeight.w900, fontSize: 12)),
+                    ],
+                  ),
+                ),
+                _buildClaimButton(context, user, adProv, id, isReady, reward),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildProgressCircle(double progress, ColorScheme colorScheme) {
+    bool isReady = progress >= 1.0;
+    return Stack(
+      alignment: Alignment.center,
+      children: [
+        SizedBox(
+          width: 42,
+          height: 42,
+          child: CircularProgressIndicator(
+            value: progress,
+            strokeWidth: 4,
+            backgroundColor: colorScheme.outlineVariant.withOpacity(0.2),
+            color: isReady ? Colors.greenAccent : colorScheme.primary,
+          ),
+        ),
+        Icon(
+          isReady ? Icons.check : Icons.access_time_filled,
+          size: 18,
+          color: isReady ? Colors.greenAccent : colorScheme.onSurfaceVariant,
+        ),
+      ],
+    );
+  }
+
+  Widget _buildClaimButton(BuildContext context, UserProvider user, AdProvider adProv, String id, bool isReady, int reward) {
+    final isClaimed = user.isRewardClaimed(id);
+    final colorScheme = Theme.of(context).colorScheme;
+
+    // Logic: Is the mission done, not claimed, AND is an ad actually ready?
+    bool adIsReady = adProv.isRewardedReady;
+    bool canClick = isReady && !isClaimed && adIsReady;
+    bool isWaitingForAd = isReady && !isClaimed && !adIsReady;
+
+    return ElevatedButton(
+      onPressed: canClick
+          ? () async {
+        // 1. Call the new method name
+        await adProv.showRewardedAd(
+          // 2. Pass the logic into the required callback
+          onUserEarnedReward: (ad, rewardItem) {
+            // This runs only after the ad is finished
+            user.claimTimeReward(id, reward);
+            _showSuccessDialog(context, Colors.greenAccent);
+          },
+        );
+      }
+          : null,
+      style: ElevatedButton.styleFrom(
+        backgroundColor: isClaimed
+            ? Colors.transparent
+            : (canClick ? AppConstants.deepPurpleColor : colorScheme.surfaceContainer),
+        foregroundColor: isClaimed ? colorScheme.onSurface : colorScheme.onPrimary,
+        elevation: canClick ? 4 : 0,
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(12),
+          side: isClaimed ? BorderSide(color: colorScheme.outlineVariant) : BorderSide.none,
+        ),
+      ),
+      child: isWaitingForAd
+          ? SizedBox(
+        width: 18,
+        height: 18,
+        child: CircularProgressIndicator(
+          strokeWidth: 2,
+          color: colorScheme.primary,
+        ),
+      )
+          : Text(
+        isClaimed
+            ? "DONE"
+            : (adProv.secondsRemaining > 0
+            ? "${adProv.secondsRemaining}s"
+            : "CLAIM"),
+      ),
+    );
+  }
 
   // --- Trade Card Widget ---
   Widget _tradeCard(BuildContext context, String title, String price, IconData icon, Color accent, VoidCallback action) {
@@ -250,190 +250,6 @@ class _ShopScreenState extends State<ShopScreen> {
       ),
     );
   }
-
-  // --- Chest Row Widget ---
-  // Widget _buildChestRow(BuildContext context, UserProvider user, AdProvider adProv) {
-  //   return SingleChildScrollView(
-  //     scrollDirection: Axis.horizontal,
-  //     child: Row(
-  //       children: [
-  //         // 1. SIMPLE CHEST
-  //         _chestItem(
-  //             context,
-  //             "SIMPLE",
-  //             "DAILY FREE",
-  //             Colors.greenAccent,
-  //             'assets/images/chest_simple_sprite.png', // Path to your 6-frame JPG
-  //             _isSimpleOpen,
-  //             "• 10-50 Coins (100%)\n• 1 Power-up (50%)",
-  //                 () async {
-  //               // 1. Check if already claimed or loading
-  //               if (user.isRewardClaimed("chest_simple") || adProv.isAdLoading) {
-  //                 return;
-  //               }
-  //
-  //               // 2. Start Animation Immediately
-  //               setState(() => _isSimpleOpen = true);
-  //
-  //               // 3. Wait for the 600ms animation to complete
-  //               await Future.delayed(const Duration(milliseconds: 600));
-  //
-  //               // 4. Play Ad AFTER chest is open
-  //               bool success = await adProv.showRewarded();
-  //
-  //               // 5. If Ad finishes successfully, give rewards
-  //               if (success) {
-  //                 user.claimTimeReward("chest_simple", 0);
-  //                 _openChest(context, user, "Simple");
-  //               } else {
-  //                 // Optional: Reset chest to closed if they cancel the ad
-  //                 setState(() => _isSimpleOpen = false);
-  //                 _showError(context, "Ad dismissed. Claim failed.");
-  //               }
-  //             }
-  //         ),
-  //
-  //         // 2. EPIC CHEST
-  //         _chestItem(
-  //             context,
-  //             "EPIC",
-  //             "250 COINS",
-  //             Colors.blueAccent,
-  //             'assets/images/chest_epic_sprite.png',
-  //             _isEpicOpen,
-  //             "• 5-10 Power-ups (100%)\n• Rare Chance: Lives",
-  //                 () async {
-  //               // 1. Check if already claimed or loading
-  //               if (user.isRewardClaimed("chest_epic") || adProv.isAdLoading) {
-  //                 return;
-  //               }
-  //
-  //               // 2. Start Animation Immediately
-  //               setState(() => _isEpicOpen = true);
-  //
-  //               // 3. Wait for the 600ms animation to complete
-  //               await Future.delayed(const Duration(milliseconds: 600));
-  //
-  //               // 4. Play Ad AFTER chest is open
-  //               bool success = await adProv.showRewarded();
-  //
-  //               // 5. If Ad finishes successfully, give rewards
-  //               if (success) {
-  //                 user.claimTimeReward("chest_epic", 0);
-  //                 _openChest(context, user, "Epic");
-  //               } else {
-  //                 // Optional: Reset chest to closed if they cancel the ad
-  //                 setState(() => _isEpicOpen = false);
-  //                 _showError(context, "Ad dismissed. Claim failed.");
-  //               }
-  //             }
-  //         ),
-  //
-  //         // 3. LEGENDARY CHEST
-  //         _chestItem(
-  //             context,
-  //             "LEGENDARY",
-  //             "1000 COINS",
-  //             Colors.purpleAccent,
-  //             'assets/images/chest_legendary_sprite.png',
-  //             _isLegendaryOpen,
-  //             "• 30-50 Power-ups (100%)\n• Rare Chance: Lives",
-  //                 () async {
-  //               // 1. Check if already claimed or loading
-  //               if (user.isRewardClaimed("chest_legendary") || adProv.isAdLoading) {
-  //                 return;
-  //               }
-  //
-  //               // 2. Start Animation Immediately
-  //               setState(() => _isLegendaryOpen = true);
-  //
-  //               // 3. Wait for the 600ms animation to complete
-  //               await Future.delayed(const Duration(milliseconds: 600));
-  //
-  //               // 4. Play Ad AFTER chest is open
-  //               bool success = await adProv.showRewarded();
-  //
-  //               // 5. If Ad finishes successfully, give rewards
-  //               if (success) {
-  //                 user.claimTimeReward("chest_legendary", 0);
-  //                 _openChest(context, user, "Legendary");
-  //               } else {
-  //                 // Optional: Reset chest to closed if they cancel the ad
-  //                 setState(() => _isLegendaryOpen = false);
-  //                 _showError(context, "Ad dismissed. Claim failed.");
-  //               }
-  //             }
-  //         ),
-  //       ],
-  //     ),
-  //   );
-  // }
-
-  // --- Updated Chest Item Widget ---
-  // Widget _chestItem(
-  //     BuildContext context,
-  //     String name,
-  //     String price,
-  //     Color color,
-  //     String spritePath,
-  //     bool isOpen,
-  //     String info,
-  //     VoidCallback onTap
-  //     ) {
-  //   return Container(
-  //     width: 140,
-  //     margin: const EdgeInsets.only(right: 12),
-  //     padding: const EdgeInsets.all(12),
-  //     decoration: BoxDecoration(
-  //       color: color.withOpacity(0.05),
-  //       borderRadius: BorderRadius.circular(24),
-  //       border: Border.all(color: color.withOpacity(0.2)),
-  //     ),
-  //     child: Column(
-  //       children: [
-  //         TweenAnimationBuilder<double>(
-  //           tween: Tween(begin: 0.0, end: 1.0),
-  //           duration: const Duration(seconds: 2),
-  //           builder: (context, value, child) {
-  //             // This creates a pulsing effect by oscillating the blur radius
-  //             double pulse = (sin(value * 2 * pi) + 1) / 2;
-  //             return AnimatedContainer(
-  //               duration: const Duration(milliseconds: 500),
-  //               decoration: BoxDecoration(
-  //                 shape: BoxShape.circle,
-  //                 boxShadow: [
-  //                   BoxShadow(
-  //                     color: isOpen ? Colors.transparent : color.withOpacity(0.3),
-  //                     blurRadius: isOpen ? 0 : 15 + (pulse * 15),
-  //                     spreadRadius: isOpen ? 0 : 2 + (pulse * 3),
-  //                   ),
-  //                 ],
-  //               ),
-  //               child: child,
-  //             );
-  //           },
-  //           child: SpriteChest(
-  //             assetPath: spritePath,
-  //             isOpen: isOpen,
-  //             onTap: onTap,
-  //           ),
-  //         ),
-  //
-  //         // --------------------------------------------------
-  //
-  //         const SizedBox(height: 8),
-  //         Text(name, style: TextStyle(color: color, fontWeight: FontWeight.bold, fontSize: 13)),
-  //         Text(price, style: const TextStyle(color: Colors.white38, fontSize: 10)),
-  //         const SizedBox(height: 4),
-  //         // Info Button
-  //         GestureDetector(
-  //           onTap: () => _showInfoDialog(context, name, info, color),
-  //           child: Icon(Icons.info_outline, size: 16, color: color.withOpacity(0.5)),
-  //         ),
-  //       ],
-  //     ),
-  //   );
-  // }
 
   Widget _buildCategoryRow(BuildContext context, UserProvider user, String title, SkinRarity rarity) {
     // Filter skins for this specific category
@@ -560,52 +376,6 @@ class _ShopScreenState extends State<ShopScreen> {
         ],
       ),
     );
-  }
-
-  void _showInfoDialog(BuildContext context, String title, String content, Color color) {
-    showDialog(
-      context: context,
-      builder: (context) => AlertDialog(
-        backgroundColor: Colors.black,
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20), side: BorderSide(color: color)),
-        title: Text("$title CONTENTS", style: TextStyle(color: color)),
-        content: Text(content, style: const TextStyle(color: Colors.white70)),
-        actions: [TextButton(onPressed: () => Navigator.pop(context), child: const Text("CLOSE"))],
-      ),
-    );
-  }
-
-  // --- Logic Helpers ---
-  void _openChest(BuildContext context, UserProvider user, String type) {
-    int c = 0; int p = 0;
-    final random = Random();
-    if (type == "Simple") { c = 10 + random.nextInt(41); p = random.nextBool() ? 1 : 0; }
-    else if (type == "Epic") { p = 5 + random.nextInt(6); }
-    else { c = 500 + random.nextInt(301); p = 20 + random.nextInt(11); }
-    user.addPurchasedItems(c, p);
-    _showLootDialog(context, c, p);
-  }
-
-  void _showLootDialog(BuildContext context, int coins, int powers) {
-    showDialog(
-      context: context,
-      builder: (context) => AlertDialog(
-        backgroundColor: Colors.black,
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20), side: const BorderSide(color: Colors.amber, width: 2)),
-        title: const Center(child: Text("CHEST UNLOCKED!", style: TextStyle(color: Colors.amber))),
-        content: Row(
-          mainAxisAlignment: MainAxisAlignment.spaceEvenly,
-          children: [
-            if (coins > 0) _lootItem(Icons.monetization_on, "+$coins", Colors.amber),
-            if (powers > 0) _lootItem(Icons.bolt, "+$powers", Colors.purpleAccent),
-          ],
-        ),
-      ),
-    );
-  }
-
-  Widget _lootItem(IconData icon, String val, Color color) {
-    return Column(mainAxisSize: MainAxisSize.min, children: [Icon(icon, color: color), Text(val, style: const TextStyle(color: Colors.white))]);
   }
 
   void _handleExchange(BuildContext context, bool condition, String title, String msg, IconData icon, Color color, VoidCallback onConfirm) {

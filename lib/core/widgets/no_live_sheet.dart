@@ -18,7 +18,7 @@ class _NoLivesSheetState extends State<NoLivesSheet> {
   Widget build(BuildContext context) {
     // Accessing providers
     final lifeProv = Provider.of<LifeProvider>(context, listen: false);
-    // final adProv = Provider.of<AdProvider>(context);
+    final adProv = Provider.of<AdProvider>(context);
 
     String buttonText = "WATCH AD";
 
@@ -54,37 +54,48 @@ class _NoLivesSheetState extends State<NoLivesSheet> {
               const SizedBox(height: 32),
 
               // Action Button
-              // ElevatedButton.icon(
-              //   onPressed: adProv.isAdLoading || adProv.secondsRemaining > 0 || adProv.reachedLimit ? null : () async {
-              //     bool success = await adProv.showRewarded();
-              //     if (success) {
-              //       lifeProv.addLives(1);
-              //     } else {
-              //       ScaffoldMessenger.of(context).showSnackBar(
-              //           const SnackBar(content: Text("Ad not ready or limit reached. Try again soon!"))
-              //       );
-              //     }
-              //   },
-              //   icon: adProv.isAdLoading
-              //       ? const SizedBox(width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2))
-              //       : const Icon(Icons.play_circle_fill),
-              //   label: Text(buttonText),
-              //   style: ElevatedButton.styleFrom(
-              //     backgroundColor: AppConstants.primaryColor,
-              //     disabledBackgroundColor: Colors.white10,
-              //     minimumSize: const Size(double.infinity, 56),
-              //   ),
-              // ),
+              ElevatedButton.icon(
+                onPressed: adProv.isAdLoading || adProv.secondsRemaining > 0 || adProv.reachedLimit
+                    ? null
+                    : () async {
+                  // 1. Call the updated method name
+                  await adProv.showRewardedAd(
+                    // 2. Provide the required callback
+                    onUserEarnedReward: (ad, reward) {
+                      // This code only runs if the user finishes the ad
+                      lifeProv.addLives(1);
 
-              // // Secondary text to show progress
-              // if (!adProv.reachedLimit)
-              //   Padding(
-              //     padding: const EdgeInsets.only(top: 8.0),
-              //     child: Text(
-              //       "Daily Ads: ${adProv.dailyAdsWatched}/5",
-              //       style: const TextStyle(color: Colors.white38, fontSize: 12),
-              //     ),
-              //   ),
+                      // Optional: Provide feedback or close the sheet
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        const SnackBar(content: Text("Life Added!")),
+                      );
+                    },
+                  );
+                },
+                icon: adProv.isAdLoading
+                    ? const SizedBox(
+                  width: 20,
+                  height: 20,
+                  child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white),
+                )
+                    : const Icon(Icons.play_circle_fill),
+                label: Text(buttonText),
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: AppConstants.primaryColor,
+                  disabledBackgroundColor: Colors.white10,
+                  minimumSize: const Size(double.infinity, 56),
+                ),
+              ),
+
+              // Secondary text to show progress
+              if (!adProv.reachedLimit)
+                Padding(
+                  padding: const EdgeInsets.only(top: 8.0),
+                  child: Text(
+                    "Daily Ads: ${adProv.dailyAdsWatched}/5",
+                    style: const TextStyle(color: Colors.white38, fontSize: 12),
+                  ),
+                ),
 
               TextButton(
                 onPressed: () => Navigator.pop(context),

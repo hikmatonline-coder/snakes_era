@@ -1,7 +1,8 @@
 import 'package:firebase_core/firebase_core.dart';
 import 'package:flutter/material.dart';
-// import 'package:google_mobile_ads/google_mobile_ads.dart';
+import 'package:google_mobile_ads/google_mobile_ads.dart';
 import 'package:provider/provider.dart';
+import 'package:snakes_era/provider/ads_provider.dart';
 import 'auth/auth_wrapper.dart';
 import 'core/constants.dart';
 import 'core/theme.dart';
@@ -19,7 +20,7 @@ Future<void> main() async {
   // Initialize Services in parallel for faster startup
   await Future.wait([
     Firebase.initializeApp(),
-    // MobileAds.instance.initialize(),
+    MobileAds.instance.initialize(),
   ]);
 
   runApp(
@@ -29,7 +30,7 @@ Future<void> main() async {
         ChangeNotifierProvider(create: (_) => AuthProvider()),
         ChangeNotifierProvider(create: (_) => LifeProvider()),
         ChangeNotifierProvider(create: (_) => SpinProvider()),
-        // ChangeNotifierProvider(create: (_) => AdProvider()),
+        ChangeNotifierProvider(create: (_) => AdProvider()),
         ChangeNotifierProvider(create: (_) => UserProvider()),
         ChangeNotifierProvider(create: (_) => SnakeGameProvider()),
       ],

@@ -5,138 +5,194 @@ import 'package:flutter/material.dart';
 import '../core/widgets/snake_game_widget.dart';
 
 class SnakeGameProvider with ChangeNotifier {
+  // --- Constants ---
   final double worldSize = 6000.0;
+  final double chunkSize = 500.0; // The grid size for rendering
   final double baseSnakeSpeed = 3.5;
   final double spacing = 4.5;
 
+  // --- State Variables ---
   Offset playerPos = const Offset(3000, 3000);
   double playerAngle = 0.0;
   double targetAngle = 0.0;
   List<Offset> playerBody = [];
+
+  // THE PERFORMANCE COMBO:
+  List<Food> foods = [];
+  Map<String, List<Food>> chunkedFoods = {}; // This is for the Painter
+
+  List<NPCSnake> npcs = [];
   int score = 0;
   double fractionalLength = 35.0;
   int currentLengthLimit = 20;
   bool isGameOver = false;
   bool isBoosting = false;
   bool isInvincible = false;
-  List<Food> foods = [];
-  List<NPCSnake> npcs = [];
-  Timer? gameTimer;
-  int frameCounter = 0;
   bool isPaused = false;
+  int frameCounter = 0;
 
+  int adsWatchedThisSession = 0; // Track 3-ad limit
+  final int maxAdsPerSession = 3;
+  bool isScoreDoubled = false; // Flag for the 2x reward
+
+  Timer? gameTimer;
   DateTime _lastTick = DateTime.now();
-
+  late List<Color> activeSkinColors;
   final List<String> botNames = ["Dragon", "Shadow", "Mamba", "Alpha", "Neon", "Viper", "Hunter", "Swift", "Venom", "Bolt"];
 
-  // To handle collision death colors
-  late List<Color> activeSkinColors;
-
+  // --- Core Lifecycle ---
   void startGame(List<Color> skinColors) {
     activeSkinColors = skinColors;
     resetGame();
   }
-
-  void togglePause() {
-    if (isGameOver) return;
-
-    isPaused = !isPaused;
-
-    if (isPaused) {
-      gameTimer?.cancel();
-    } else {
-      // Reset _lastTick so the snake doesn't "jump" after unpausing
-      _lastTick = DateTime.now();
-      gameTimer = Timer.periodic(const Duration(milliseconds: 16), (timer) => _gameTick());
-    }
-    notifyListeners();
-  }
-
-  void setTargetAngle(double angle) => targetAngle = angle;
-
-  void setBoosting(bool val) { isBoosting = val; notifyListeners(); }
 
   void resetGame() {
     gameTimer?.cancel();
     playerPos = const Offset(3000, 3000);
     playerBody = List.generate(20, (i) => const Offset(3000, 3000));
     score = 0;
+    adsWatchedThisSession = 0;
+    isScoreDoubled = false;
     fractionalLength = 35.0;
     currentLengthLimit = 20;
     isGameOver = false;
     isBoosting = false;
     isInvincible = false;
+
+    // Clear everything
     foods = [];
+    chunkedFoods = {};
     npcs = [];
+
     _spawnFood(1500);
     _spawnNPCs(50);
+
+    _lastTick = DateTime.now();
     gameTimer = Timer.periodic(const Duration(milliseconds: 16), (timer) => _gameTick());
     notifyListeners();
   }
 
-  void _ejectBoostFood() {
-    if (playerBody.isEmpty) return;
-
-    var rng = Random();
-    // Get the last segment of the snake
-    Offset tailPos = playerBody.last;
-
-    // Add a small piece of loot (size 0) using the snake's current skin color
-    foods.add(Food(
-      tailPos + Offset(rng.nextDouble() * 10 - 5, rng.nextDouble() * 10 - 5),
-      0, // Smallest size
-      activeSkinColors[0], // Use primary skin color
-      isLoot: true, // It's "loot" so it glows and is magnetic
-    ));
+  // NEW: Call this instead of resetGame when user wants to double score
+  void doubleScore() {
+    if (!isScoreDoubled) {
+      score *= 2;
+      isScoreDoubled = true;
+      notifyListeners();
+    }
   }
 
-  void _gameTick() {
-    if (isGameOver) return;
+  // --- Food Synchronization (The Most Important Part) ---
 
-    // --- CALCULATE DELTA TIME (Add this) ---
+  String getChunkKey(Offset pos) {
+    int x = (pos.dx / chunkSize).floor();
+    int y = (pos.dy / chunkSize).floor();
+    return "$x,$y";
+  }
+
+  void _addNewFood(Food f) {
+    foods.add(f);
+    String key = getChunkKey(f.pos);
+    chunkedFoods.putIfAbsent(key, () => []).add(f);
+  }
+
+  void _removeFood(Food f) {
+    foods.remove(f);
+    String key = getChunkKey(f.pos);
+    chunkedFoods[key]?.remove(f);
+  }
+
+  // --- Spawning Logic ---
+
+  void _spawnFood(int count) {
+    var rng = Random();
+    for (int i = 0; i < count; i++) {
+      bool isSmall = rng.nextDouble() < 0.8;
+      Food newFood = Food(
+          Offset(rng.nextDouble() * worldSize, rng.nextDouble() * worldSize),
+          isSmall ? 0 : 1,
+          Colors.primaries[rng.nextInt(Colors.primaries.length)],
+          isLoot: false
+      );
+      _addNewFood(newFood);
+    }
+  }
+
+  void _ejectBoostFood() {
+    if (playerBody.length < 5) return;
+
+    var rng = Random();
+    // Get the last two segments to calculate the "backward" direction
+    Offset tail = playerBody.last;
+    Offset prevTail = playerBody[playerBody.length - 2];
+
+    // Calculate a vector pointing away from the snake
+    Offset directionAway = (tail - prevTail);
+    if (directionAway.distance == 0) directionAway = const Offset(1, 0);
+
+    // Normalize and push the food 20-30 pixels away from the tail
+    Offset spawnPos = tail + (directionAway / directionAway.distance) * 25.0;
+
+    Food boostLoot = Food(
+      spawnPos + Offset(rng.nextDouble() * 10 - 5, rng.nextDouble() * 10 - 5),
+      0, // Small food type
+      activeSkinColors[0],
+      isLoot: true,
+    );
+    _addNewFood(boostLoot);
+  }
+
+  void _handleSnakeDeath(List<Offset> bodySegments, List<Color> snakeColors) {
+    var rng = Random();
+    for (int i = 0; i < bodySegments.length; i += 10) {
+      Food deathLoot = Food(
+        bodySegments[i] + Offset(rng.nextDouble() * 5, rng.nextDouble() * 5),
+        rng.nextInt(3),
+        snakeColors[i % snakeColors.length],
+        isLoot: true,
+      );
+      _addNewFood(deathLoot);
+    }
+  }
+
+  // --- Game Loop ---
+
+  void _gameTick() {
+    // If the game is over, paused, or the provider is disposed, stop everything immediately
+    if (isGameOver || isPaused) return;
+
     final now = DateTime.now();
     final double dt = now.difference(_lastTick).inMicroseconds / 1000000.0;
+
+    // Safety: If the frame drop is massive (e.g., phone lagged),
+    // don't try to calculate a huge jump. Cap it at 0.03 seconds.
+    double cappedDt = dt.clamp(0.0, 0.03);
     _lastTick = now;
 
     frameCounter++;
     _movePlayerLogic(dt);
 
-    // --- BOOST COST LOGIC ---
-    // Only lose length if boosting and length is greater than the starting minimum (e.g., 15)
     if (isBoosting && playerBody.length > 15) {
-      // Drop food every 5 frames to avoid cluttering the map too fast
-      if (frameCounter % 5 == 0) {
+      if (frameCounter % 12 == 0) {
         _ejectBoostFood();
-
-        // Decrease fractional length (this reduces the snake's actual size)
-        fractionalLength -= 0.15;
+        fractionalLength -= 0.1;
         currentLengthLimit = fractionalLength.toInt();
-
-        // Also update score if you want boosting to "cost" points
-        if (score > 0) score -= 5;
+        if (score > 0) score -= 1;
       }
     }
 
-    // 1. Move the food toward the player
     _applyFoodMagnet(dt);
 
-    // 2. Check if the player hit the food
-    // Only check heavy collisions every 2nd frame to save CPU
     if (frameCounter % 2 == 0) {
       _checkCollisions();
     }
 
-    // 1. Move ALL NPCs every frame (Movement must be smooth)
+    // NPC Logic
     for (var npc in npcs) {
-      double npcSpeed = npc.isBoosting ? 4.5 : 3.0;
-      npc.move(npcSpeed, dt);
+      npc.move(npc.isBoosting ? 4.5 : 3.0, dt);
     }
 
-    // 2. ONLY UPDATE 5 NPC BRAINS (The "Think" optimization)
-    // This spreads the heavy CPU work over multiple frames
     int npcsToUpdate = 5;
     for (int i = 0; i < npcsToUpdate; i++) {
-      // This formula ensures we rotate through the whole list of NPCs
       int index = (frameCounter + i) % npcs.length;
       if (index < npcs.length) {
         npcs[index].think(playerBody, npcs, foods, worldSize);
@@ -146,135 +202,96 @@ class SnakeGameProvider with ChangeNotifier {
     notifyListeners();
   }
 
+  // --- Optimized SnakeGameProvider ---
+
   void _checkCollisions() {
     if (isGameOver) return;
 
-    final double viewportRadius = 1200.0;
+    // --- 1. ALWAYS CHECK BORDER FIRST ---
+    if (playerPos.dx < 0 || playerPos.dx > worldSize ||
+        playerPos.dy < 0 || playerPos.dy > worldSize) if (isInvincible) {
+      // OPTION A: Teleport to opposite side (Slightly beyond the edge to prevent loops)
+      double newX = playerPos.dx;
+      double newY = playerPos.dy;
 
-  // Filter foods to only those near the player before checking distance
-    var nearbyFoods = foods.where((f) => (f.pos - playerPos).distance < viewportRadius).toList();
+      if (playerPos.dx < 0) newX = worldSize - 50;
+      else if (playerPos.dx > worldSize) newX = 50;
 
-    nearbyFoods.removeWhere((f) {
-      double headRadius = 10.0 + (playerBody.length / 100).clamp(0, 15);
+      if (playerPos.dy < 0) newY = worldSize - 50;
+      else if (playerPos.dy > worldSize) newY = 50;
 
-      if ((playerPos - f.pos).distance < headRadius + 10) {
-        // 1. Calculate Growth Factor
-        // As length increases, growth from a single piece of food decreases
-        double growthEfficiency = 1.0 / (1.0 + (playerBody.length / 500));
+      playerPos = Offset(newX, newY);
+      playerBody[0] = playerPos; // Force update head
 
-        double baseGrowth = f.isLoot ? 0.4 : 0.15;
-        double actualGrowth = baseGrowth * growthEfficiency;
+      // OPTION B: Or just flip the angle to "bounce"
+      // playerAngle += pi;
 
-        score += (f.isLoot ? 50 : 10);
-        fractionalLength += actualGrowth;
-        currentLengthLimit = fractionalLength.toInt();
+    } else {
+      // Regular death if not invincible
+      _handleSnakeDeath(playerBody, activeSkinColors);
+      _endGame();
+      return;
+    }
 
-        foods.remove(f);
-        return true;
+    // 2. COLLISION WITH FOOD (Using Chunks)
+    int pX = (playerPos.dx / chunkSize).floor();
+    int pY = (playerPos.dy / chunkSize).floor();
+
+    List<Food> checkableFood = [];
+    for (int x = pX - 1; x <= pX + 1; x++) {
+      for (int y = pY - 1; y <= pY + 1; y++) {
+        var chunk = chunkedFoods["$x,$y"];
+        if (chunk != null) checkableFood.addAll(chunk);
       }
-      return false;
-    });
+    }
 
-    // 1. NPC DEATH LOGIC
+    double headRadius = 10.0 + (playerBody.length / 100).clamp(0, 15);
+
+    for (var f in List.from(checkableFood)) {
+      // If the food is within the head's reach
+      if ((playerPos - f.pos).distance < headRadius + 10) {
+        // Just call the helper! It handles scoring, growth, and removal.
+        _processFoodConsumption(f);
+      }
+    }
+
+    // 3. NPC DEATH LOGIC (Separated for Performance)
     Set<NPCSnake> deadNPCs = {};
-
     for (var npc in npcs) {
       bool npcDied = false;
-
-      // Hit World Boundary
+      // Border check for NPCs
       if (npc.pos.dx < 0 || npc.pos.dx > worldSize || npc.pos.dy < 0 || npc.pos.dy > worldSize) {
         npcDied = true;
       }
-
-      // Hit Player Body
+      // Hit player body check
       if (!npcDied) {
-        for (var segment in playerBody.skip(5)) { // skip(5) prevents head-on glitches
-          if ((npc.pos - segment).distance < 18) {
-            npcDied = true;
-            break;
-          }
+        for (var segment in playerBody.skip(5)) {
+          if ((npc.pos - segment).distance < 18) { npcDied = true; break; }
         }
       }
-
-      // Hit Other NPC Body
-      if (!npcDied) {
-        for (var other in npcs) {
-          if (npc == other) continue;
-          // Check if npc head hits other npc body
-          for (var seg in other.body.skip(5)) {
-            if ((npc.pos - seg).distance < 18) {
-              npcDied = true;
-              break;
-            }
-          }
-          if (npcDied) break;
-        }
-      }
-
       if (npcDied) deadNPCs.add(npc);
     }
 
-    // Process NPC Deaths (Turn them into food)
     for (var npc in deadNPCs) {
       _handleSnakeDeath(npc.body, npc.colors);
       npcs.remove(npc);
-      _spawnSingleNPC(); // Respawn a new one to keep the map full
+      _spawnSingleNPC();
     }
 
-    // 2. PLAYER DEATH LOGIC
+    // 4. PLAYER DEATH LOGIC (Snake vs Snake)
     if (!isInvincible) {
-      bool playerDied = false;
-
-      // Hit World Boundary
-      if (playerPos.dx < 0 || playerPos.dx > worldSize || playerPos.dy < 0 || playerPos.dy > worldSize) {
-        playerDied = true;
-      }
-
-      // Hit NPC Body
-      if (!playerDied) {
-        for (var npc in npcs) {
-          for (var segment in npc.body.skip(2)) {
-            if ((playerPos - segment).distance < 18) {
-              playerDied = true;
-              break;
-            }
+      for (var npc in npcs) {
+        for (var segment in npc.body.skip(2)) {
+          if ((playerPos - segment).distance < 18) {
+            _handleSnakeDeath(playerBody, activeSkinColors);
+            _endGame();
+            return;
           }
-          if (playerDied) break;
         }
-      }
-
-      if (playerDied) {
-        _handleSnakeDeath(playerBody, activeSkinColors);
-        _endGame();
-        return;
       }
     }
 
-    // 3. FOOD CONSUMPTION
-    foods.removeWhere((f) {
-      double radius = 10.0 + (playerBody.length / 80).clamp(0, 15);
-      if ((playerPos - f.pos).distance < radius + 15) {
-        double growth = f.isLoot ? 0.1 : 0.33;
-        score += (growth * 100).toInt();
-        fractionalLength += growth;
-        currentLengthLimit = fractionalLength.toInt();
-        return true;
-      }
-      return false;
-    });
-
-    // NPCs eating food
-    for (var npc in npcs) {
-      double npcRadius = 10.0 + (npc.body.length / 80).clamp(0, 15);
-      foods.removeWhere((f) {
-        if ((npc.pos - f.pos).distance < npcRadius + 15) {
-          npc.length += f.isLoot ? 2 : 1;
-          return true;
-        }
-        return false;
-      });
-    }
-
+    // Maintenance: keep food density
     if (foods.length < 1000) _spawnFood(150);
   }
 
@@ -284,214 +301,161 @@ class SnakeGameProvider with ChangeNotifier {
     while (diff < -pi) diff += 2 * pi;
     while (diff > pi) diff -= 2 * pi;
 
-    // Normalize turning speed with dt
     playerAngle += diff * (10.0 * agility * dt);
-
-    double lengthPenalty = (playerBody.length / 3000).clamp(0.0, 0.4);
-    double speedMultiplier = 1.0 - lengthPenalty;
-
-    // Use the scaled speed (210.0 is roughly 3.5 * 60)
-    double frameIndependentSpeed = 210.0;
-
-    double moveSpeed = isBoosting
-        ? (frameIndependentSpeed * 1.8) * speedMultiplier
-        : frameIndependentSpeed * speedMultiplier;
-
+    double speedMultiplier = 1.0 - (playerBody.length / 3000).clamp(0.0, 0.4);
+    double moveSpeed = (isBoosting ? 378.0 : 210.0) * speedMultiplier;
     if (moveSpeed < 130.0) moveSpeed = 130.0;
 
-    // Move the player position
     playerPos += Offset(cos(playerAngle) * moveSpeed * dt, sin(playerAngle) * moveSpeed * dt);
 
-    // --- FIXING THE GAPS ---
-    // If the phone lags and the snake moves a long distance, we need to fill the gap
     if (playerBody.isEmpty) {
       playerBody.insert(0, playerPos);
     } else {
-      double distSinceLastSegment = (playerPos - playerBody.first).distance;
-
-      // If we moved more than 1 'spacing' unit, add segments until caught up
-      while (distSinceLastSegment > spacing) {
-        // Find the position for the intermediate segment
-        double ratio = spacing / distSinceLastSegment;
-        Offset newSegmentPos = Offset.lerp(playerBody.first, playerPos, ratio)!;
-
-        playerBody.insert(0, newSegmentPos);
-        distSinceLastSegment = (playerPos - playerBody.first).distance;
+      double dist = (playerPos - playerBody.first).distance;
+      while (dist > spacing) {
+        playerBody.insert(0, Offset.lerp(playerBody.first, playerPos, spacing / dist)!);
+        dist = (playerPos - playerBody.first).distance;
       }
     }
 
-    // Keep the body at the correct length
-    while (playerBody.length > currentLengthLimit) {
-      playerBody.removeLast();
-    }
+    while (playerBody.length > currentLengthLimit) playerBody.removeLast();
   }
 
-  void _handleSnakeDeath(List<Offset> bodySegments, List<Color> snakeColors) {
-    var rng = Random();
-    // Spawn food every 10 segments instead of every 2 or 6
-    // This creates a clean, spaced-out trail
-    for (int i = 0; i < bodySegments.length; i += 10) {
-      foods.add(Food(
-        bodySegments[i] + Offset(rng.nextDouble() * 5, rng.nextDouble() * 5),
-        rng.nextInt(3), // 0, 1, or 2 for size variety
-        snakeColors[i % snakeColors.length],
-        isLoot: true,
-      ));
-    }
-  }
+  // --- Helpers ---
 
-  void _spawnSingleNPC() {
-    var rng = Random();
-    Offset spawnPos = Offset(rng.nextDouble() * worldSize, rng.nextDouble() * worldSize);
-    // Ensure it doesn't spawn right on top of the player
-    while ((spawnPos - playerPos).distance < 800) {
-      spawnPos = Offset(rng.nextDouble() * worldSize, rng.nextDouble() * worldSize);
-    }
-    npcs.add(NPCSnake(spawnPos, 35, [Colors.primaries[rng.nextInt(15)], Colors.white], NPCType.beginner, "Bot_${rng.nextInt(100)}", NPCSize.medium));
-  }
-
-  void revivePlayer() {
-    isGameOver = false;
-    isInvincible = true; // Shield ON
-
-    // Reset clock to prevent the "time jump" teleportation
-    _lastTick = DateTime.now();
-
-    // Reset body segments so you don't instantly die on your own tail
-    playerBody = List.generate(currentLengthLimit, (i) => playerPos);
-
-    // Restart the game loop if it was cancelled
-    gameTimer?.cancel();
-    gameTimer = Timer.periodic(const Duration(milliseconds: 16), (timer) => _gameTick());
-
-    // Use a standard Timer for the 10-second duration
-    Timer(const Duration(seconds: 10), () {
-      isInvincible = false; // Shield OFF
-      notifyListeners();    // Tell the Painter to stop drawing the glow
-      debugPrint("Shield Expired");
-    });
-
-    notifyListeners();
-  }
-
-  void _endGame() {
-    isGameOver = true;
-    gameTimer?.cancel();
-
-    notifyListeners();
-  }
-
-  // This method will be called by your UI, passing the necessary IDs
-  Future<void> syncFinalScore({required String userId, required int finalScore}) async {
-    try {
-      await FirebaseFirestore.instance.collection('users').doc(userId).set({
-        // We use SetOptions(merge: true) and standard logic
-        // because FieldValue.maximum does not exist in the Flutter SDK
-        'lastScore': finalScore,
-        'lastUpdated': FieldValue.serverTimestamp(),
-      }, SetOptions(merge: true));
-
-      // Note: High score logic is usually handled better in UserProvider
-      // where you compare (newScore > oldScore) before writing.
-    } catch (e) {
-      debugPrint("Firebase Sync Error: $e");
-    }
-  }
-
-  // Helper Methods for Spawning
-  NPCType _rankForSize(NPCSize sz, Random rng) {
-    double roll = rng.nextDouble() * 100;
-    switch (sz) {
-      case NPCSize.small:
-        if (roll < 50) return NPCType.beginner;
-        if (roll < 80) return NPCType.noob;
-        if (roll < 95) return NPCType.pro;
-        return NPCType.legend;
-      case NPCSize.medium:
-        if (roll < 20) return NPCType.beginner;
-        if (roll < 60) return NPCType.noob;
-        if (roll < 90) return NPCType.pro;
-        return NPCType.legend;
-      case NPCSize.large:
-        if (roll < 5) return NPCType.beginner;
-        if (roll < 30) return NPCType.noob;
-        if (roll < 75) return NPCType.pro;
-        return NPCType.legend;
-      case NPCSize.xlarge:
-        if (roll < 10) return NPCType.noob;
-        if (roll < 50) return NPCType.pro;
-        return NPCType.legend;
-    }
-  }
-
-  void _spawnFood(int count) {
-    var rng = Random();
-    for (int i = 0; i < count; i++) {
-      bool isSmall = rng.nextDouble() < 0.8;
-      foods.add(Food(
-          Offset(rng.nextDouble() * worldSize, rng.nextDouble() * worldSize),
-          isSmall ? 0 : 1,
-          Colors.primaries[rng.nextInt(Colors.primaries.length)],
-          isLoot: false // Map food is not loot
-      ));
-    }
-  }
-
+  // OPTIMIZED MAGNET (Only pulls nearby loot to save CPU)
   void _applyFoodMagnet(double dt) {
-    for (var food in foods) {
-      if (food.isLoot) {
-        double dist = (playerPos - food.pos).distance;
-        if (dist < 180) { // Slightly larger range
-          // Strength gets exponentially stronger as it gets closer
-          double pullStrength = pow((180 - dist) / 180, 2) * 15 * (dt * 60);
+    int pX = (playerPos.dx / chunkSize).floor();
+    int pY = (playerPos.dy / chunkSize).floor();
 
-          Offset direction = (playerPos - food.pos) / dist;
+    for (int x = pX - 1; x <= pX + 1; x++) {
+      for (int y = pY - 1; y <= pY + 1; y++) {
+        var chunk = chunkedFoods["$x,$y"];
+        if (chunk == null) continue;
 
-          // Add a tiny bit of random noise so they don't move in a perfect straight line
-          double noise = (Random().nextDouble() - 0.5) * 2;
+        // Use a standard for loop to avoid concurrent modification issues
+        for (int i = chunk.length - 1; i >= 0; i--) {
+          var food = chunk[i];
+          if (food.isLoot) {
+            double dist = (playerPos - food.pos).distance;
 
-          food.pos += direction * pullStrength + Offset(noise, noise);
+            // --- SAFETY FIX ---
+            // If food is super close (less than 15px), "eat" it immediately
+            // to prevent it getting stuck at the border
+            if (dist < 15) {
+              _processFoodConsumption(food);
+              continue;
+            }
+
+            if (dist < 180) {
+              double pull = pow((180 - dist) / 180, 2) * 25 * (dt * 60);
+              food.pos += (playerPos - food.pos) / dist * pull;
+            }
+          }
         }
       }
     }
   }
 
-  void _spawnNPCs(int count) {
-    var rng = Random();
-    for (int i = 0; i < count; i++) {
-      // Size: 20% small, 35% medium, 35% large, 10% xlarge
-      double roll = rng.nextDouble() * 100;
-      NPCSize sz;
-      int startLen;
-      if (roll < 20) {
-        sz = NPCSize.small;
-        startLen = 25 + rng.nextInt(16); // 25-40
-      } else if (roll < 55) {
-        sz = NPCSize.medium;
-        startLen = 50 + rng.nextInt(31); // 50-80
-      } else if (roll < 90) {
-        sz = NPCSize.large;
-        startLen = 120 + rng.nextInt(81); // 120-200
-      } else {
-        sz = NPCSize.xlarge;
-        startLen = 300 + rng.nextInt(201); // 300-500
-      }
-      NPCType type = _rankForSize(sz, rng);
+  void _processFoodConsumption(Food f) {
+    // CRITICAL: Remove it immediately so no other logic can see it
+    _removeFood(f);
 
-      String name = "${botNames[rng.nextInt(botNames.length)]}_${rng.nextInt(99)}";
-      List<Color> colors = [
-        Colors.primaries[rng.nextInt(Colors.primaries.length)],
-        Colors.primaries[rng.nextInt(Colors.primaries.length)],
-      ];
-
-      Offset spawnPos;
-      do {
-        spawnPos = Offset(rng.nextDouble() * worldSize, rng.nextDouble() * worldSize);
-      } while ((spawnPos - playerPos).distance < 600);
-
-      npcs.add(NPCSnake(spawnPos, startLen, colors, type, name, sz));
+    // 1. Calculate Score
+    if (f.isLoot) {
+      score += 5;
+    } else if (f.type == 0) {
+      score += 1;
+    } else {
+      score += 3;
     }
+
+    // 2. Calculate Growth
+    double efficiency = 1.0 / (1.0 + (playerBody.length / 500));
+    double growth = (f.isLoot ? 0.4 : 0.15) * efficiency;
+
+    fractionalLength += growth;
+    currentLengthLimit = fractionalLength.toInt();
+
+    // 3. Optional: Trigger a tiny haptic or sound here
+    // notifyListeners(); // Only call if you aren't calling it at the end of the tick
   }
+
+  void _spawnSingleNPC() {
+    var rng = Random();
+    Offset spawnPos;
+    do {
+      spawnPos = Offset(rng.nextDouble() * worldSize, rng.nextDouble() * worldSize);
+    } while ((spawnPos - playerPos).distance < 800);
+
+    // Pick a professional name from your list, or fallback to a numbered bot if list is empty
+    String name = botNames[rng.nextInt(botNames.length)];
+
+    // Optional: Add a random number to the name to avoid duplicates on the leaderboard
+    String uniqueName = "$name#${rng.nextInt(99)}";
+
+    npcs.add(NPCSnake(
+        spawnPos,
+        rng.nextInt(40) + 20, // Give them random starting lengths
+        [Colors.primaries[rng.nextInt(Colors.primaries.length)], Colors.white],
+        NPCType.beginner,
+        uniqueName,
+        NPCSize.medium
+    ));
+  }
+
+  void _spawnNPCs(int count) {
+    for (int i = 0; i < count; i++) _spawnSingleNPC();
+  }
+
+  void togglePause() {
+    if (isGameOver) return;
+    isPaused = !isPaused;
+    if (!isPaused) _lastTick = DateTime.now();
+    notifyListeners();
+  }
+
+  void revivePlayer() {
+    isGameOver = false;
+    isPaused = false;
+    isInvincible = true;
+
+    // 1. Teleport player to a safe distance from the edge (e.g., center)
+    playerPos = const Offset(3000, 3000);
+
+    // 2. Reset body to the new position so the snake doesn't "stretch" across the map
+    playerBody = List.generate(currentLengthLimit, (i) => const Offset(3000, 3000));
+
+    // 3. Clear and Respawn world entities
+    foods = [];
+    chunkedFoods = {};
+    npcs = [];
+    _spawnFood(1500);
+    _spawnNPCs(50);
+
+    // 4. Restart Timer
+    targetAngle = playerAngle;
+    gameTimer?.cancel();
+    _lastTick = DateTime.now();
+    gameTimer = Timer.periodic(const Duration(milliseconds: 16), (timer) => _gameTick());
+
+    notifyListeners();
+
+    // 5. Longer invincibility for border safety
+    Timer(const Duration(seconds: 4), () {
+      isInvincible = false;
+      notifyListeners();
+    });
+  }
+
+  void _endGame() {
+    isGameOver = true;
+    gameTimer?.cancel();
+    notifyListeners();
+  }
+
+  void setTargetAngle(double angle) => targetAngle = angle;
+  void setBoosting(bool val) { isBoosting = val; notifyListeners(); }
 
   @override
   void dispose() { gameTimer?.cancel(); super.dispose(); }

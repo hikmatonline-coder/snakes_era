@@ -82,9 +82,12 @@ class _SpinWheelScreenState extends State<SpinWheelScreen> with SingleTickerProv
 
   // --- 4. SUB-WIDGETS ---
   Widget _buildControlPanel(SpinProvider prov) {
-    // Access AdProvider to get the countdown value
-    // final adProv = Provider.of<AdProvider>(context);
-    // final int adCooldown = adProv.secondsRemaining;
+
+    final adProv = Provider.of<AdProvider>(context);
+
+    int seconds = adProv.secondsRemaining;
+    // Change: Only say ad is "Ready" if the timer has hit zero
+    bool adReady = adProv.isRewardedReady && seconds == 0;
 
     return ClipRRect(
       child: BackdropFilter(
@@ -104,23 +107,26 @@ class _SpinWheelScreenState extends State<SpinWheelScreen> with SingleTickerProv
                   if (result != null) _handleReward(result);
                 }, AppConstants.deepPurpleColor)
 
-              // else if (prov.extraSpinsAvailable > 0)
-              //   _actionButton(
-              //     prov,
-              //     adCooldown > 0
-              //         ? "WAIT ${adCooldown}s" // This text will show if not "RECHARGING"
-              //         : "WATCH AD TO SPIN",
-              //         () async {
-              //       bool success = await adProv.showRewarded();
-              //       if (success) {
-              //         String? result = await prov.spin(_controller, rewards, false);
-              //         if (result != null) _handleReward(result);
-              //       }
-              //     },
-              //     adCooldown > 0 ? Colors.grey : Colors.orangeAccent,
-              //     isTimerActive: adCooldown > 0,
-              //   )
+              else if (prov.extraSpinsAvailable > 0)
+                _actionButton(
+                  prov,
+                  seconds > 0
+                      ? "NEXT AD IN ${seconds}s"
+                      : (adReady ? "WATCH AD TO SPIN" : "LOADING AD..."),
 
+                      () async {
+                    // 1. Call the method using the required callback parameter
+                    await adProv.showRewardedAd(
+                      onUserEarnedReward: (ad, reward) async {
+                        // 2. This code runs ONLY if the user finishes the ad
+                        String? result = await prov.spin(_controller, rewards, false);
+                        if (result != null) _handleReward(result);
+                      },
+                    );
+                  },
+                  adReady ? Colors.orangeAccent : Colors.grey,
+                  isTimerActive: seconds > 0 || !adReady,
+                )
               else
                 _statusText("DAILY LIMIT REACHED"),
               const SizedBox(height: 20),
@@ -174,19 +180,13 @@ class _SpinWheelScreenState extends State<SpinWheelScreen> with SingleTickerProv
 
   // Added SpinProvider here to check for isSpinning
   Widget _actionButton(SpinProvider prov, String text, VoidCallback onTap, Color color, {bool isTimerActive = false}) {
-    bool isDailyCoolingDown = prov.cooldownText.isNotEmpty && !prov.canDailySpin;
+    // A spin is only "Recharging" if the Daily Spin is used up.
+    // For Ad spins, we only care if the timer is active AND no ad is ready.
+    bool isDisabled = prov.isSpinning || isTimerActive;
 
-    // Disable if: Spinning OR Daily Cooldown OR 30s Ad Timer is active
-    bool isDisabled = prov.isSpinning || isDailyCoolingDown || isTimerActive;
-
-    // Determine the text to display
     String buttonText = text;
     if (prov.isSpinning) {
       buttonText = "SPINNING...";
-    } else if (isDailyCoolingDown) {
-      buttonText = "RECHARGING...";
-    } else if (isTimerActive) {
-      buttonText = "COOLDOWN..."; // Or use the text passed from build which has the seconds
     }
 
     return ElevatedButton(
@@ -205,6 +205,7 @@ class _SpinWheelScreenState extends State<SpinWheelScreen> with SingleTickerProv
       ),
     );
   }
+
   // The Reward Distributor
   void _handleReward(String result) {
     final lifeProv = Provider.of<LifeProvider>(context, listen: false);
@@ -242,6 +243,9 @@ class _SpinWheelScreenState extends State<SpinWheelScreen> with SingleTickerProv
   }
 
   void _showLootDialog(String title, String sub, IconData icon, Color color) {
+
+    final adProv = Provider.of<AdProvider>(context, listen: false);
+
     showDialog(
       context: context,
       builder: (context) => BackdropFilter(
@@ -267,7 +271,15 @@ class _SpinWheelScreenState extends State<SpinWheelScreen> with SingleTickerProv
               const SizedBox(height: 30),
               ElevatedButton(
                 style: ElevatedButton.styleFrom(backgroundColor: color, foregroundColor: Colors.black),
-                onPressed: () => Navigator.pop(context),
+                onPressed: () {
+                  // 1. Close the dialog
+                  Navigator.pop(context);
+
+                  // 2. Show the Interstitial Ad after collecting
+                  Future.delayed(const Duration(milliseconds: 300), () {
+                    adProv.showInterstitialAd();
+                  });
+                },
                 child: const Text("COLLECT"),
               ),
             ],
