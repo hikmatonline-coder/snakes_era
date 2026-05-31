@@ -3,6 +3,7 @@ import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:google_sign_in/google_sign_in.dart';
+import '../core/constants.dart';
 import '../model/user_model.dart';
 
 class AuthProvider extends ChangeNotifier {
@@ -66,8 +67,15 @@ class AuthProvider extends ChangeNotifier {
           displayName: firebaseUser.displayName ?? 'Arcade Player',
           photoUrl: firebaseUser.photoURL ?? 'https://picsum.photos/200',
           highScore: 0,
+          coins: AppConstants.coins,
+          powerUps: AppConstants.powerUps,
+          lives: AppConstants.maxLives,
         );
-        await docRef.set(newUser.toMap(), SetOptions(merge: true));
+        await docRef.set({
+          ...newUser.toMap(),
+          'lastRegenMs': null,
+          'lastUpdated': FieldValue.serverTimestamp(),
+        }, SetOptions(merge: true));
         _user = newUser;
       }
     } catch (e) {

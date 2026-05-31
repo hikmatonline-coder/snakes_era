@@ -8,6 +8,7 @@ import 'package:snakes_era/core/constants.dart';
 
 class UserProvider extends ChangeNotifier {
   final _storage = const FlutterSecureStorage();
+  final FirebaseFirestore _db = FirebaseFirestore.instance;
 
   int _coins = AppConstants.coins;
   int _powerUps = AppConstants.powerUps;
@@ -20,51 +21,51 @@ class UserProvider extends ChangeNotifier {
 
   int get totalSecondsPlayed => _totalSecondsPlayed;
 
-  // Variables to hold user data
   String _userName = "Player";
   int _highScore = 0;
   String? _uid;
+  bool _remoteLoaded = false;
 
-  // Getters
   String get userName => _userName;
   int get highScore => _highScore;
   String? get uid => _uid;
+  bool get remoteLoaded => _remoteLoaded;
 
-  // --- NEW SKIN VARIABLES ---
-  String _currentSkinId = "s1"; // Default classic skin
-  Set<String> _ownedSkinIds = {"s1"}; // Default unlocked
+  String _currentSkinId = "c1";
+  Set<String> _ownedSkinIds = {"c1"};
 
   String get currentSkinId => _currentSkinId;
   Set<String> get ownedSkinIds => _ownedSkinIds;
 
   UserProvider() {
-    _loadBalances();
     _loadSkins();
     _startGlobalTimer();
     _init();
+  }
+
+  String? get _firebaseUid => FirebaseAuth.instance.currentUser?.uid;
+
+  DocumentReference<Map<String, dynamic>>? get _userDoc {
+    final uid = _firebaseUid;
+    if (uid == null) return null;
+    return _db.collection('users').doc(uid);
   }
 
   Future<void> _init() async {
     final now = DateTime.now();
     final today = now.toIso8601String().split('T')[0];
 
-    // 1. Load Last Reset Date
     String? lastResetDate = await _storage.read(key: 'last_mission_reset_date');
-
-    // 2. Load Total Seconds
     String? savedSeconds = await _storage.read(key: 'seconds_played');
     _totalSecondsPlayed = int.parse(savedSeconds ?? '0');
 
-    // 3. Check for Daily Reset
     if (lastResetDate != today) {
-      // NEW DAY: Reset missions and playtime
       _totalSecondsPlayed = 0;
       _claimedRewards = {};
       await _storage.write(key: 'last_mission_reset_date', value: today);
       await _storage.write(key: 'seconds_played', value: '0');
       await _storage.write(key: 'claimed_tasks', value: '');
     } else {
-      // SAME DAY: Load claimed rewards
       String? claimed = await _storage.read(key: 'claimed_tasks');
       if (claimed != null && claimed.isNotEmpty) {
         _claimedRewards = claimed.split(',').toSet();
@@ -74,40 +75,105 @@ class UserProvider extends ChangeNotifier {
     notifyListeners();
   }
 
+  /// Loads coins, powerUps, and highScore from Firestore. Call after login.
+  Future<void> loadRemoteUserData() async {
+    final docRef = _userDoc;
+    if (docRef == null) return;
+
+    try {
+      final snapshot = await docRef.get();
+      final user = FirebaseAuth.instance.currentUser;
+
+      if (user != null) {
+        _uid = user.uid;
+        _userName = user.displayName ?? "SnakeMaster";
+      }
+
+      if (snapshot.exists) {
+        final data = snapshot.data()!;
+        await _applyRemoteData(data);
+      } else {
+        await _createDefaultFirestoreProfile();
+      }
+
+      _remoteLoaded = true;
+    } catch (e) {
+      debugPrint('Failed to load user data from Firestore: $e');
+    } finally {
+      notifyListeners();
+    }
+  }
+
+  Future<void> _applyRemoteData(Map<String, dynamic> data) async {
+    _coins = (data['coins'] as num?)?.toInt() ?? AppConstants.coins;
+    _powerUps = (data['powerUps'] as num?)?.toInt() ?? AppConstants.powerUps;
+    _highScore = (data['highScore'] as num?)?.toInt() ?? 0;
+
+    final remoteSkins = data['ownedSkinIds'];
+    if (remoteSkins is List) {
+      _ownedSkinIds = remoteSkins.map((e) => e.toString()).toSet();
+      if (_ownedSkinIds.isEmpty) _ownedSkinIds = {"c1"};
+    }
+    _currentSkinId = data['currentSkinId'] as String? ?? _currentSkinId;
+
+    // One-time migration from local secure storage
+    final localCoins = await _storage.read(key: 'coins');
+    final localPowers = await _storage.read(key: 'powers');
+    if (data['coins'] == null && localCoins != null) {
+      _coins = int.tryParse(localCoins) ?? _coins;
+    }
+    if (data['powerUps'] == null && localPowers != null) {
+      _powerUps = int.tryParse(localPowers) ?? _powerUps;
+    }
+
+    await _syncBalancesToFirestore();
+    await _syncSkins();
+    await _clearLocalBalances();
+  }
+
+  Future<void> _createDefaultFirestoreProfile() async {
+    final user = FirebaseAuth.instance.currentUser;
+    if (user == null) return;
+
+    _coins = AppConstants.coins;
+    _powerUps = AppConstants.powerUps;
+
+    await _userDoc!.set({
+      'email': user.email,
+      'displayName': user.displayName ?? 'Snake Player',
+      'photoUrl': user.photoURL,
+      'highScore': 0,
+      'coins': _coins,
+      'powerUps': _powerUps,
+      'lives': AppConstants.maxLives,
+      'lastRegenMs': null,
+      'ownedSkinIds': _ownedSkinIds.toList(),
+      'currentSkinId': _currentSkinId,
+      'lastUpdated': FieldValue.serverTimestamp(),
+    }, SetOptions(merge: true));
+  }
+
+  Future<void> _clearLocalBalances() async {
+    await _storage.delete(key: 'coins');
+    await _storage.delete(key: 'powers');
+  }
+
   void _startGlobalTimer() {
     Timer.periodic(const Duration(seconds: 1), (timer) {
       _totalSecondsPlayed++;
       notifyListeners();
 
-      // Auto-save every 30 seconds
       if (_totalSecondsPlayed % 30 == 0) {
         _storage.write(key: 'seconds_played', value: _totalSecondsPlayed.toString());
       }
     });
   }
 
-  Future<void> _loadBalances() async {
-    String? c = await _storage.read(key: 'coins');
-    String? p = await _storage.read(key: 'powers');
-
-    // Set starting balances only if it's the first time
-    if (c == null) {
-      await _save(100, 10);
-      _coins = 100;
-      _powerUps = 10;
-    } else {
-      _coins = int.parse(c);
-      _powerUps = int.parse(p ?? '10');
-    }
-    notifyListeners();
-  }
-
-  // --- Exchange Logic ---
   bool buyPower() {
     if (_coins >= 25) {
       _coins -= 25;
       _powerUps += 1;
-      _save(_coins, _powerUps);
+      _syncBalancesToFirestore();
       return true;
     }
     return false;
@@ -117,27 +183,19 @@ class UserProvider extends ChangeNotifier {
     if (_powerUps >= 1) {
       _powerUps -= 1;
       _coins += 18;
-      _save(_coins, _powerUps);
+      _syncBalancesToFirestore();
       return true;
     }
     return false;
   }
 
-  // Used by LifeProvider/Shop to trade 1 Powerup for 1 Life
   bool tradePowerForLife() {
     if (_powerUps >= 1) {
       _powerUps -= 1;
-      _save(_coins, _powerUps);
+      _syncBalancesToFirestore();
       return true;
     }
     return false;
-  }
-
-  void startSessionTimer() {
-    Timer.periodic(const Duration(seconds: 1), (timer) {
-      _totalSecondsPlayed++;
-      notifyListeners();
-    });
   }
 
   bool isRewardClaimed(String id) => _claimedRewards.contains(id);
@@ -149,7 +207,6 @@ class UserProvider extends ChangeNotifier {
       _claimedRewards.add(id);
       addPurchasedItems(coins, 0);
 
-      // Save status and ensure the date is current
       await _storage.write(key: 'claimed_tasks', value: _claimedRewards.join(','));
       await _storage.write(key: 'last_mission_reset_date', value: today);
 
@@ -157,7 +214,6 @@ class UserProvider extends ChangeNotifier {
     }
   }
 
-  /// Load skins from storage
   Future<void> _loadSkins() async {
     String? current = await _storage.read(key: 'current_skin_id');
     String? owned = await _storage.read(key: 'owned_skin_ids');
@@ -169,81 +225,81 @@ class UserProvider extends ChangeNotifier {
     notifyListeners();
   }
 
-  /// Check if a specific skin is owned
   bool isSkinOwned(String id) => _ownedSkinIds.contains(id);
 
-  /// Handle skin purchase
   bool buySkin(String id, int price) {
     if (_coins >= price && !_ownedSkinIds.contains(id)) {
       _coins -= price;
       _ownedSkinIds.add(id);
-      _currentSkinId = id; // Auto-equip on buy
-      _syncSkins(); // Save to storage
-      _sync();      // Save coins
+      _currentSkinId = id;
+      _syncSkins();
+      _syncBalancesToFirestore();
       return true;
     }
     return false;
   }
 
-  /// Change equipped skin
   void setSkin(String id) async {
     if (_ownedSkinIds.contains(id)) {
       _currentSkinId = id;
       await _storage.write(key: 'current_skin_id', value: id);
+      _syncSkins();
       notifyListeners();
     }
   }
 
-  /// Helper to save owned skins list
   Future<void> _syncSkins() async {
     await _storage.write(key: 'owned_skin_ids', value: _ownedSkinIds.join(','));
     await _storage.write(key: 'current_skin_id', value: _currentSkinId);
+
+    final docRef = _userDoc;
+    if (docRef != null) {
+      await docRef.set({
+        'ownedSkinIds': _ownedSkinIds.toList(),
+        'currentSkinId': _currentSkinId,
+        'lastUpdated': FieldValue.serverTimestamp(),
+      }, SetOptions(merge: true));
+    }
+
     notifyListeners();
   }
 
-  /// Deducts coins if available. Returns true if successful.
   bool spendCoins(int amount) {
     if (_coins >= amount) {
       _coins -= amount;
-      _sync(); // This calls your _save and notifyListeners logic
+      _syncBalancesToFirestore();
       return true;
     }
     return false;
   }
 
-  /// Unified method to add resources from Chests, Spin Wheels, or IAP
   void addPurchasedItems(int coinAmount, int powerAmount) {
     _coins += coinAmount;
     _powerUps += powerAmount;
-    _sync();
+    _syncBalancesToFirestore();
   }
 
   void addCoins(int amount) {
     _coins += amount;
-    // Save to SharedPreferences or Database here
-    notifyListeners();
+    _syncBalancesToFirestore();
   }
 
   void addPowerUps(int amount) {
     _powerUps += amount;
-    notifyListeners();
+    _syncBalancesToFirestore();
   }
 
-  /// Update high Score to firebase...
-  // 1. Call this when the user logs in or when the app starts
   void initializeUser() {
     final user = FirebaseAuth.instance.currentUser;
     if (user != null) {
       _uid = user.uid;
       _userName = user.displayName ?? "SnakeMaster";
-      // You could also fetch the high score from Firestore here
-      _loadRemoteHighScore();
+      loadRemoteUserData();
     }
   }
 
-  // 2. Logic to update High Score in Firebase
   Future<void> updateHighScore(int newScore) async {
-    final user = FirebaseAuth.instance.currentUser; // Get fresh ID
+    final user = FirebaseAuth.instance.currentUser;
     if (user == null) {
       debugPrint("DEBUG: No User Logged In!");
       return;
@@ -253,37 +309,40 @@ class UserProvider extends ChangeNotifier {
       _highScore = newScore;
       notifyListeners();
 
-      await FirebaseFirestore.instance.collection('users').doc(user.uid).set({
+      await _db.collection('users').doc(user.uid).set({
         'highScore': _highScore,
         'displayName': user.displayName ?? "Snake Player",
         'email': user.email,
         'lastUpdated': FieldValue.serverTimestamp(),
       }, SetOptions(merge: true));
-
-      debugPrint("DEBUG: Firestore Updated Successfully!");
     }
   }
 
-  // Helper to pull the score from Firebase when app opens
-  Future<void> _loadRemoteHighScore() async {
-    if (_uid == null) return;
-    var doc = await FirebaseFirestore.instance.collection('leaderboard').doc(_uid).get();
-    if (doc.exists) {
-      _highScore = doc.data()?['score'] ?? 0;
-      notifyListeners();
-    }
-  }
-
-  /// Helper to handle both saving to Secure Storage and UI refreshing
-  Future<void> _sync() async {
-    await _storage.write(key: 'coins', value: _coins.toString());
-    await _storage.write(key: 'powers', value: _powerUps.toString());
+  Future<void> _syncBalancesToFirestore() async {
     notifyListeners();
+
+    final docRef = _userDoc;
+    if (docRef == null) return;
+
+    try {
+      await docRef.set({
+        'coins': _coins,
+        'powerUps': _powerUps,
+        'lastUpdated': FieldValue.serverTimestamp(),
+      }, SetOptions(merge: true));
+    } catch (e) {
+      debugPrint('Failed to sync balances to Firestore: $e');
+    }
   }
 
-  Future<void> _save(int c, int p) async {
-    await _storage.write(key: 'coins', value: c.toString());
-    await _storage.write(key: 'powers', value: p.toString());
+  /// Resets in-memory state after sign-out.
+  void resetLocalState() {
+    _uid = null;
+    _remoteLoaded = false;
+    _coins = AppConstants.coins;
+    _powerUps = AppConstants.powerUps;
+    _highScore = 0;
+    _userName = "Player";
     notifyListeners();
   }
 }

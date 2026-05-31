@@ -1,18 +1,24 @@
 import 'dart:async';
+
+import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
+
 import '../core/constants.dart';
 
 class LifeProvider with ChangeNotifier {
   final _storage = const FlutterSecureStorage();
+  final FirebaseFirestore _db = FirebaseFirestore.instance;
 
   int _lives = AppConstants.maxLives;
   DateTime? _lastRegen;
   Timer? _regenTimer;
+  bool _remoteLoaded = false;
 
   int get lives => _lives;
+  bool get remoteLoaded => _remoteLoaded;
 
-  // Formatted string for the UI (e.g., 04:59)
   String get timeUntilNextLifeStr {
     final duration = timeUntilNextLife;
     if (duration == Duration.zero) return "FULL";
@@ -31,16 +37,95 @@ class LifeProvider with ChangeNotifier {
     _init();
   }
 
-  Future<void> _init() async {
-    String? livesStr = await _storage.read(key: AppConstants.keyLives);
-    _lives = int.tryParse(livesStr ?? '') ?? AppConstants.maxLives;
+  DocumentReference<Map<String, dynamic>>? get _userDoc {
+    final uid = FirebaseAuth.instance.currentUser?.uid;
+    if (uid == null) return null;
+    return _db.collection('users').doc(uid);
+  }
 
-    String? lastRegenStr = await _storage.read(key: AppConstants.keyLastRegen);
-    if (lastRegenStr != null) {
-      _lastRegen = DateTime.fromMillisecondsSinceEpoch(int.parse(lastRegenStr));
+  Future<void> _init() async {
+    _startTimer();
+  }
+
+  /// Loads lives and regen timer from Firestore. Call after login.
+  Future<void> loadRemoteUserData() async {
+    final docRef = _userDoc;
+    if (docRef == null) return;
+
+    try {
+      final snapshot = await docRef.get();
+
+      if (snapshot.exists) {
+        final data = snapshot.data()!;
+        final remoteLives = (data['lives'] as num?)?.toInt();
+
+        if (remoteLives != null) {
+          _lives = remoteLives;
+        } else {
+          await _migrateFromLocalStorage();
+        }
+
+        final lastRegenMs = data['lastRegenMs'];
+        if (lastRegenMs is int) {
+          _lastRegen = DateTime.fromMillisecondsSinceEpoch(lastRegenMs);
+        } else {
+          _lastRegen = null;
+        }
+      } else {
+        await _migrateFromLocalStorage();
+        await _ensureDefaultLivesOnFirestore();
+      }
+
+      _applyMaxLivesCapOnLoad();
+      _checkRegen();
+      await _clearLocalLifeStorage();
+      _remoteLoaded = true;
+    } catch (e) {
+      debugPrint('Failed to load lives from Firestore: $e');
+      await _migrateFromLocalStorage();
+      _applyMaxLivesCapOnLoad();
       _checkRegen();
     }
-    _startTimer();
+
+    notifyListeners();
+  }
+
+  Future<void> _migrateFromLocalStorage() async {
+    final livesStr = await _storage.read(key: AppConstants.keyLives);
+    final lastRegenStr = await _storage.read(key: AppConstants.keyLastRegen);
+
+    if (livesStr != null) {
+      _lives = int.tryParse(livesStr) ?? AppConstants.maxLives;
+    } else {
+      _lives = AppConstants.maxLives;
+    }
+
+    if (lastRegenStr != null) {
+      _lastRegen = DateTime.fromMillisecondsSinceEpoch(int.parse(lastRegenStr));
+    }
+  }
+
+  void _applyMaxLivesCapOnLoad() {
+    // Natural regen cap is maxLives; reward overfill above cap is kept.
+    if (_lives > AppConstants.maxLives && _lives <= 7) {
+      _lives = AppConstants.maxLives;
+    }
+  }
+
+  Future<void> _ensureDefaultLivesOnFirestore() async {
+    final docRef = _userDoc;
+    if (docRef == null) return;
+
+    await docRef.set({
+      'lives': _lives,
+      'lastRegenMs': _lastRegen?.millisecondsSinceEpoch,
+      'lastUpdated': FieldValue.serverTimestamp(),
+    }, SetOptions(merge: true));
+  }
+
+  Future<void> _clearLocalLifeStorage() async {
+    await _storage.delete(key: AppConstants.keyLives);
+    await _storage.delete(key: AppConstants.keyLastRegen);
   }
 
   void _startTimer() {
@@ -52,7 +137,6 @@ class LifeProvider with ChangeNotifier {
   }
 
   void _checkRegen() {
-    // If we are overfilled (e.g., 10/5 lives), we don't regen and don't need a timer
     if (_lives >= AppConstants.maxLives) {
       _lastRegen = null;
       return;
@@ -64,18 +148,15 @@ class LifeProvider with ChangeNotifier {
 
     if (difference >= AppConstants.lifeRegenSeconds) {
       final livesToGain = difference ~/ AppConstants.lifeRegenSeconds;
-      // Note: We clamp here so natural regen doesn't push you over the cap
       _lives = (_lives + livesToGain).clamp(0, AppConstants.maxLives);
       _lastRegen = now.subtract(Duration(seconds: difference % AppConstants.lifeRegenSeconds));
       _saveState();
     }
   }
 
-  // UPDATED: This allows for "Overfilling" lives from rewards
   void addLives(int amount) {
-    _lives += amount; // No clamp here! If they win 50, they keep 50.
+    _lives += amount;
 
-    // Stop regen if we are above or at max
     if (_lives >= AppConstants.maxLives) {
       _lastRegen = null;
     }
@@ -98,10 +179,25 @@ class LifeProvider with ChangeNotifier {
   }
 
   Future<void> _saveState() async {
-    await _storage.write(key: AppConstants.keyLives, value: _lives.toString());
-    if (_lastRegen != null) {
-      await _storage.write(key: AppConstants.keyLastRegen, value: _lastRegen!.millisecondsSinceEpoch.toString());
+    final docRef = _userDoc;
+    if (docRef == null) return;
+
+    try {
+      await docRef.set({
+        'lives': _lives,
+        'lastRegenMs': _lastRegen?.millisecondsSinceEpoch,
+        'lastUpdated': FieldValue.serverTimestamp(),
+      }, SetOptions(merge: true));
+    } catch (e) {
+      debugPrint('Failed to sync lives to Firestore: $e');
     }
+  }
+
+  void resetLocalState() {
+    _lives = AppConstants.maxLives;
+    _lastRegen = null;
+    _remoteLoaded = false;
+    notifyListeners();
   }
 
   @override

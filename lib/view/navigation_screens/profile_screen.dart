@@ -2,7 +2,9 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../../core/constants.dart';
 import '../../provider/auth_provider.dart';
+import '../../provider/life_provider.dart';
 import '../../provider/theme_provider.dart';
+import '../../provider/user_provider.dart';
 
 class ProfileScreen extends StatelessWidget {
   const ProfileScreen({super.key});
@@ -53,9 +55,9 @@ class ProfileScreen extends StatelessWidget {
             const SizedBox(height: 40),
             ElevatedButton(
               onPressed: () async {
+                context.read<UserProvider>().resetLocalState();
+                context.read<LifeProvider>().resetLocalState();
                 await authProvider.signOut();
-                // AuthWrapper listens to AuthProvider and will
-                // automatically switch back to the AuthScreen.
               },
               style: ElevatedButton.styleFrom(
                 backgroundColor: Colors.redAccent.withOpacity(0.1),

@@ -1,18 +1,28 @@
 import 'dart:async';
-import 'package:flutter/material.dart';
-import 'package:flutter_secure_storage/flutter_secure_storage.dart';
+import 'dart:developer' as developer;
+
+import 'package:flutter/foundation.dart';
 import 'package:google_mobile_ads/google_mobile_ads.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import '../core/ad_helper.dart';
+import '../core/ads_initializer.dart';
 
 class AdProvider extends ChangeNotifier {
 
-  final _storage = const FlutterSecureStorage();
+  static const String _appOpenCountKey = 'app_open_count';
+  static const int _showAppOpenEveryNthOpen = 3;
+  static const Duration _appOpenAdMaxCache = Duration(hours: 4);
 
   // Ad objects
   InterstitialAd? _interstitialAd;
   RewardedAd? _rewardedAd;
+  AppOpenAd? _appOpenAd;
+  DateTime? _appOpenAdLoadTime;
+  bool _isLoadingAppOpenAd = false;
+  bool _isShowingAppOpenAd = false;
+
+  bool get isShowingAppOpenAd => _isShowingAppOpenAd;
 
   RewardedAd? get rewardedAd => _rewardedAd;
   RewardedInterstitialAd? _rewardedInterstitialAd;
@@ -65,8 +75,8 @@ class AdProvider extends ChangeNotifier {
       _lastAdTimestamp = DateTime.fromMillisecondsSinceEpoch(lastMillis);
     }
 
-    // 3. Start Background Loading
-    _loadAllAds();
+    // 3. Load ads only after UMP + Mobile Ads SDK are ready
+    await _startAdsWhenReady();
 
     // 4. UI Refresh Ticker
     Timer.periodic(const Duration(seconds: 1), (timer) {
@@ -74,10 +84,164 @@ class AdProvider extends ChangeNotifier {
     });
   }
 
+  Future<void> _startAdsWhenReady() async {
+    await AdsInitializer.instance.ready;
+
+    if (!AdsInitializer.instance.canRequestAds) {
+      _logAd('Cannot request ads yet (consent pending). Retrying in 15s...');
+      Future.delayed(const Duration(seconds: 15), () async {
+        if (await ConsentInformation.instance.canRequestAds()) {
+          _loadAllAds();
+        }
+      });
+      return;
+    }
+
+    _logAd(
+      'Loading ads (${AdHelper.isUsingProductionAds ? "PRODUCTION" : "TEST"} units)',
+    );
+    _loadAllAds();
+  }
+
   void _loadAllAds() {
+    if (!AdsInitializer.instance.canRequestAds) return;
     loadInterstitialAd();
     loadRewardedAd();
-    // _loadRewardedInterstitial();
+    loadAppOpenAd();
+  }
+
+  void _logAd(String message, {LoadAdError? error}) {
+    developer.log(message, name: 'SnakesEraAds');
+    if (error != null) {
+      developer.log(
+        'code=${error.code} domain=${error.domain} message=${error.message}',
+        name: 'SnakesEraAds',
+      );
+    }
+    if (kReleaseMode) {
+      print('[SnakesEraAds] $message${error != null ? " | ${error.message}" : ""}');
+    } else {
+      debugPrint('[SnakesEraAds] $message${error != null ? " | $error" : ""}');
+    }
+  }
+
+  // --- App Open Ad (every 3rd app open) ---
+  void loadAppOpenAd() {
+    if (_isLoadingAppOpenAd || _isAppOpenAdAvailable) return;
+
+    _isLoadingAppOpenAd = true;
+
+    AppOpenAd.load(
+      adUnitId: AdHelper.appOpenAdUnitId,
+      request: const AdRequest(),
+      adLoadCallback: AppOpenAdLoadCallback(
+        onAdLoaded: (ad) {
+          _appOpenAd = ad;
+          _appOpenAdLoadTime = DateTime.now();
+          _isLoadingAppOpenAd = false;
+          debugPrint('AppOpenAd loaded');
+        },
+        onAdFailedToLoad: (error) {
+          _appOpenAd = null;
+          _appOpenAdLoadTime = null;
+          _isLoadingAppOpenAd = false;
+          _logAd('AppOpenAd failed (${AdHelper.appOpenAdUnitId})', error: error);
+          Future.delayed(const Duration(seconds: 8), loadAppOpenAd);
+        },
+      ),
+    );
+  }
+
+  bool get _isAppOpenAdAvailable {
+    if (_appOpenAd == null || _appOpenAdLoadTime == null) return false;
+    return DateTime.now().difference(_appOpenAdLoadTime!) < _appOpenAdMaxCache;
+  }
+
+  /// Called when the app enters foreground. Shows an app-open ad every 3rd open.
+  Future<void> onAppOpen() async {
+    if (_isShowingAppOpenAd) return;
+
+    final prefs = await SharedPreferences.getInstance();
+    final openCount = (prefs.getInt(_appOpenCountKey) ?? 0) + 1;
+    await prefs.setInt(_appOpenCountKey, openCount);
+
+    debugPrint('App open count: $openCount');
+
+    if (openCount % _showAppOpenEveryNthOpen != 0) {
+      if (!_isAppOpenAdAvailable && !_isLoadingAppOpenAd) {
+        loadAppOpenAd();
+      }
+      return;
+    }
+
+    await _showAppOpenAdIfAvailable();
+  }
+
+  Future<void> _showAppOpenAdIfAvailable() async {
+    if (_isShowingAppOpenAd) return;
+
+    if (!_isAppOpenAdAvailable) {
+      await _loadAndShowAppOpenAd();
+      return;
+    }
+
+    _isShowingAppOpenAd = true;
+
+    _appOpenAd!.fullScreenContentCallback = FullScreenContentCallback(
+      onAdShowedFullScreenContent: (ad) {
+        debugPrint('AppOpenAd showed');
+      },
+      onAdDismissedFullScreenContent: (ad) {
+        ad.dispose();
+        _appOpenAd = null;
+        _appOpenAdLoadTime = null;
+        _isShowingAppOpenAd = false;
+        loadAppOpenAd();
+      },
+      onAdFailedToShowFullScreenContent: (ad, error) {
+        debugPrint('AppOpenAd failed to show: $error');
+        ad.dispose();
+        _appOpenAd = null;
+        _appOpenAdLoadTime = null;
+        _isShowingAppOpenAd = false;
+        loadAppOpenAd();
+      },
+    );
+
+    await _appOpenAd!.show();
+  }
+
+  Future<void> _loadAndShowAppOpenAd() async {
+    if (_isLoadingAppOpenAd || _isShowingAppOpenAd) return;
+
+    final completer = Completer<void>();
+    _isLoadingAppOpenAd = true;
+
+    AppOpenAd.load(
+      adUnitId: AdHelper.appOpenAdUnitId,
+      request: const AdRequest(),
+      adLoadCallback: AppOpenAdLoadCallback(
+        onAdLoaded: (ad) {
+          _appOpenAd = ad;
+          _appOpenAdLoadTime = DateTime.now();
+          _isLoadingAppOpenAd = false;
+          if (!completer.isCompleted) completer.complete();
+        },
+        onAdFailedToLoad: (error) {
+          _appOpenAd = null;
+          _appOpenAdLoadTime = null;
+          _isLoadingAppOpenAd = false;
+          _logAd('AppOpenAd on-demand failed', error: error);
+          if (!completer.isCompleted) completer.complete();
+        },
+      ),
+    );
+
+    await completer.future;
+
+    if (_isAppOpenAdAvailable) {
+      await _showAppOpenAdIfAvailable();
+    }
   }
 
   // --- 1. Banner Ad ---
@@ -108,8 +272,9 @@ class AdProvider extends ChangeNotifier {
           notifyListeners();
         },
         onAdFailedToLoad: (error) {
-          debugPrint('InterstitialAd failed: $error');
+          _logAd('InterstitialAd failed (${AdHelper.interstitialAdUnitId})', error: error);
           _interstitialAd = null;
+          Future.delayed(const Duration(seconds: 8), loadInterstitialAd);
         },
       ),
     );
@@ -158,10 +323,9 @@ class AdProvider extends ChangeNotifier {
         onAdFailedToLoad: (err) {
           _rewardedAd = null;
           _isAdLoading = false;
-          debugPrint("Rewarded Ad Failed: $err");
+          _logAd('RewardedAd failed (${AdHelper.rewardedAdUnitId})', error: err);
           notifyListeners();
-          // Optional: retry after 5 seconds if failed
-          Future.delayed(const Duration(seconds: 5), () => loadRewardedAd());
+          Future.delayed(const Duration(seconds: 8), loadRewardedAd);
         },
       ),
     );
@@ -230,9 +394,9 @@ class AdProvider extends ChangeNotifier {
     _lastAdTimestamp = DateTime.now();
     _dailyAdsWatched++;
 
-    // 1. Save state
-    await _storage.write(key: 'daily_ads_watched', value: _dailyAdsWatched.toString());
-    await _storage.write(key: 'last_ad_timestamp', value: _lastAdTimestamp!.millisecondsSinceEpoch.toString());
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setInt('daily_ads_watched', _dailyAdsWatched);
+    await prefs.setInt('last_ad_timestamp', _lastAdTimestamp!.millisecondsSinceEpoch);
 
     // 2. Clear the current ad
     _rewardedAd = null;

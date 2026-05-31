@@ -1,10 +1,12 @@
 import 'package:firebase_core/firebase_core.dart';
 import 'package:flutter/material.dart';
-import 'package:google_mobile_ads/google_mobile_ads.dart';
 import 'package:provider/provider.dart';
 import 'package:snakes_era/provider/ads_provider.dart';
+import 'package:snakes_era/provider/review_provider.dart';
 import 'auth/auth_wrapper.dart';
+import 'core/ads_initializer.dart';
 import 'core/constants.dart';
+import 'core/widgets/app_open_ad_handler.dart';
 import 'core/theme.dart';
 import 'provider/life_provider.dart';
 import 'provider/snake_game_provider.dart';
@@ -20,7 +22,7 @@ Future<void> main() async {
   // Initialize Services in parallel for faster startup
   await Future.wait([
     Firebase.initializeApp(),
-    MobileAds.instance.initialize(),
+    AdsInitializer.instance.initialize(),
   ]);
 
   runApp(
@@ -31,6 +33,7 @@ Future<void> main() async {
         ChangeNotifierProvider(create: (_) => LifeProvider()),
         ChangeNotifierProvider(create: (_) => SpinProvider()),
         ChangeNotifierProvider(create: (_) => AdProvider()),
+        ChangeNotifierProvider(create: (_) => ReviewProvider()),
         ChangeNotifierProvider(create: (_) => UserProvider()),
         ChangeNotifierProvider(create: (_) => SnakeGameProvider()),
       ],
@@ -57,7 +60,9 @@ class QuantXGame extends StatelessWidget {
           themeMode: themeProvider.themeMode,
 
           // Navigation
-          home: const AuthWrapper(),
+          home: const AppOpenAdHandler(
+            child: AuthWrapper(),
+          ),
         );
       },
     );

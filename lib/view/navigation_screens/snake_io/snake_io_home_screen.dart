@@ -76,7 +76,7 @@ class SnakeIOHomeScreen extends StatelessWidget {
                   ),
                 ),
 
-                const SizedBox(height: 180),
+                const SizedBox(height: 80),
 
                 // Action Buttons
                 _buildThemeButton(

@@ -20,6 +20,24 @@ class NavigationScreen extends StatefulWidget {
 class _NavigationScreenState extends State<NavigationScreen> {
 
   int _currentIndex = 2;
+  bool _remoteDataRequested = false;
+
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addPostFrameCallback((_) => _loadRemoteGameData());
+  }
+
+  Future<void> _loadRemoteGameData() async {
+    if (_remoteDataRequested || !mounted) return;
+    _remoteDataRequested = true;
+
+    final userProv = context.read<UserProvider>();
+    final lifeProv = context.read<LifeProvider>();
+
+    userProv.initializeUser();
+    await lifeProv.loadRemoteUserData();
+  }
 
   final List<Widget> _pages = [
     const SpinWheelScreen(),
@@ -37,7 +55,7 @@ class _NavigationScreenState extends State<NavigationScreen> {
 
     // Check if we need the extra space for the timer
     // Width is 80 if lives are full (no timer), otherwise 120 (timer visible)
-    double dynamicWidth = lifeProv.lives >= 7 ? 80.0 : 120.0;
+    double dynamicWidth = lifeProv.lives >= AppConstants.maxLives ? 80.0 : 120.0;
 
     return Scaffold(
       // backgroundColor: AppColors.background,
