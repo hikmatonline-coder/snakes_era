@@ -303,18 +303,10 @@ class _SnakeIOGameState extends State<SnakeIOGame> {
           if (game.isGameOver)
             GameOverOverlay(
               score: game.score,
-              onWatchAd: () {
-                // We call the ad handler
-                _handleRewardedAdAction(() {
-                  Future.delayed(const Duration(milliseconds: 100), () {
-                    game.revivePlayer();
-                  });
-                });
+              onLoseLife: () {
+                // Handle navigation back to menu cleanly
+                Navigator.of(context).popUntil((route) => route.isFirst);
               },
-              onDoubleScore: () => _handleRewardedAdAction(() {
-                game.doubleScore();
-              }),
-              onLoseLife: _exitGame,
             ),
         ],
       ),

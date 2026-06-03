@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:snakes_era/provider/ads_provider.dart';
 import 'package:snakes_era/provider/review_provider.dart';
+import 'package:snakes_era/provider/social_provider.dart';
 import 'auth/auth_wrapper.dart';
 import 'core/ads_initializer.dart';
 import 'core/constants.dart';
@@ -36,6 +37,7 @@ Future<void> main() async {
         ChangeNotifierProvider(create: (_) => ReviewProvider()),
         ChangeNotifierProvider(create: (_) => UserProvider()),
         ChangeNotifierProvider(create: (_) => SnakeGameProvider()),
+        ChangeNotifierProvider(create: (_) => SocialProvider()),
       ],
       child: const QuantXGame(),
     ),

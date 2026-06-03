@@ -5,7 +5,7 @@ import '../../core/widgets/life_timer_widget.dart';
 import '../../provider/life_provider.dart';
 import '../../provider/user_provider.dart';
 import 'leaderboard_screen.dart';
-import 'profile_screen.dart';
+import 'profile_screen/profile_screen.dart';
 import 'shop_screen/shop_screen.dart';
 import 'snake_io/snake_io_home_screen.dart';
 import 'spin_wheel/spin_wheel_screen.dart';

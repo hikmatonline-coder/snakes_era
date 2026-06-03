@@ -7,6 +7,8 @@ class UserModel {
   final int coins;
   final int powerUps;
   final int lives;
+  final String? referredBy;
+  final String? teamId;
 
   UserModel({
     required this.id,
@@ -17,6 +19,8 @@ class UserModel {
     this.coins = 100,
     this.powerUps = 10,
     this.lives = 5,
+    this.referredBy,
+    this.teamId,
   });
 
   Map<String, dynamic> toMap() {
@@ -29,6 +33,8 @@ class UserModel {
       'coins': coins,
       'powerUps': powerUps,
       'lives': lives,
+      'referredBy': referredBy,
+      'teamId': teamId,
     };
   }
 
@@ -42,6 +48,8 @@ class UserModel {
       coins: (map['coins'] as num?)?.toInt() ?? 100,
       powerUps: (map['powerUps'] as num?)?.toInt() ?? 10,
       lives: (map['lives'] as num?)?.toInt() ?? 5,
+      referredBy: map['referredBy'],
+      teamId: map['teamId'],
     );
   }
 }

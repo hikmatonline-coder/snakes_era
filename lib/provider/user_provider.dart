@@ -6,7 +6,9 @@ import 'package:flutter/material.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:snakes_era/core/constants.dart';
 
-class UserProvider extends ChangeNotifier {
+import '../model/user_model.dart';
+
+class UserProvider with ChangeNotifier {
   final _storage = const FlutterSecureStorage();
   final FirebaseFirestore _db = FirebaseFirestore.instance;
 
@@ -26,6 +28,13 @@ class UserProvider extends ChangeNotifier {
   String? _uid;
   bool _remoteLoaded = false;
 
+  // --- Crypto Tournament States ---
+  String _cryptoWalletAddress = "";
+  String _cryptoNetwork = "Solana"; // Default network choice
+
+  String get cryptoWalletAddress => _cryptoWalletAddress;
+  String get cryptoNetwork => _cryptoNetwork;
+
   String get userName => _userName;
   int get highScore => _highScore;
   String? get uid => _uid;
@@ -41,6 +50,24 @@ class UserProvider extends ChangeNotifier {
     _loadSkins();
     _startGlobalTimer();
     _init();
+    _listenToAuthChanges();
+  }
+
+  /// Automatically monitors Firebase Auth state on app startup.
+  /// If an existing session is detected, it pulls their cloud save instantly.
+  void _listenToAuthChanges() {
+    FirebaseAuth.instance.authStateChanges().listen((User? user) {
+      if (user != null) {
+        _uid = user.uid;
+        _userName = user.displayName ?? "SnakeMaster";
+
+        // Triggers the automated remote data pipeline for existing users
+        loadRemoteUserData();
+      } else {
+        // Clear runtime cache if no active login state exists
+        resetLocalState();
+      }
+    });
   }
 
   String? get _firebaseUid => FirebaseAuth.instance.currentUser?.uid;
@@ -75,7 +102,6 @@ class UserProvider extends ChangeNotifier {
     notifyListeners();
   }
 
-  /// Loads coins, powerUps, and highScore from Firestore. Call after login.
   Future<void> loadRemoteUserData() async {
     final docRef = _userDoc;
     if (docRef == null) return;
@@ -105,30 +131,40 @@ class UserProvider extends ChangeNotifier {
   }
 
   Future<void> _applyRemoteData(Map<String, dynamic> data) async {
-    _coins = (data['coins'] as num?)?.toInt() ?? AppConstants.coins;
-    _powerUps = (data['powerUps'] as num?)?.toInt() ?? AppConstants.powerUps;
-    _highScore = (data['highScore'] as num?)?.toInt() ?? 0;
+    // 1. Convert Map to UserModel (Yeh Model wali default values use karega)
+    final user = UserModel.fromMap({...data, 'id': _uid});
 
+    // 2. State update using Model
+    _coins = user.coins;
+    _powerUps = user.powerUps;
+    _highScore = user.highScore;
+
+    // 3. Independent fields (Jo Model mein nahi hain ya separate logic rakhte hain)
+    _cryptoWalletAddress = data['cryptoWalletAddress'] as String? ?? "";
+    _cryptoNetwork = data['cryptoNetwork'] as String? ?? "Solana";
+
+    _currentSkinId = data['currentSkinId'] as String? ?? "c1";
     final remoteSkins = data['ownedSkinIds'];
     if (remoteSkins is List) {
       _ownedSkinIds = remoteSkins.map((e) => e.toString()).toSet();
-      if (_ownedSkinIds.isEmpty) _ownedSkinIds = {"c1"};
     }
-    _currentSkinId = data['currentSkinId'] as String? ?? _currentSkinId;
 
-    // One-time migration from local secure storage
+    // 4. Hydrate Secure Storage
+    await _storage.write(key: 'user_high_score_cache', value: _highScore.toString());
+
+    // 5. Local to Cloud Migration (Legacy handling)
     final localCoins = await _storage.read(key: 'coins');
     final localPowers = await _storage.read(key: 'powers');
-    if (data['coins'] == null && localCoins != null) {
-      _coins = int.tryParse(localCoins) ?? _coins;
-    }
-    if (data['powerUps'] == null && localPowers != null) {
-      _powerUps = int.tryParse(localPowers) ?? _powerUps;
-    }
 
+    if (data['coins'] == null && localCoins != null) _coins = int.tryParse(localCoins) ?? _coins;
+    if (data['powerUps'] == null && localPowers != null) _powerUps = int.tryParse(localPowers) ?? _powerUps;
+
+    // 6. Cleanup
     await _syncBalancesToFirestore();
     await _syncSkins();
     await _clearLocalBalances();
+
+    notifyListeners(); // UI refresh ke liye
   }
 
   Future<void> _createDefaultFirestoreProfile() async {
@@ -145,12 +181,30 @@ class UserProvider extends ChangeNotifier {
       'highScore': 0,
       'coins': _coins,
       'powerUps': _powerUps,
+      'cryptoWalletAddress': _cryptoWalletAddress,
+      'cryptoNetwork': _cryptoNetwork,
       'lives': AppConstants.maxLives,
       'lastRegenMs': null,
       'ownedSkinIds': _ownedSkinIds.toList(),
       'currentSkinId': _currentSkinId,
       'lastUpdated': FieldValue.serverTimestamp(),
     }, SetOptions(merge: true));
+  }
+
+  /// Updates and syncs the player's payment wallet destination
+  Future<void> updateCryptoWallet(String address, String network) async {
+    _cryptoWalletAddress = address.trim();
+    _cryptoNetwork = network.trim();
+    notifyListeners();
+
+    final docRef = _userDoc;
+    if (docRef != null) {
+      await docRef.set({
+        'cryptoWalletAddress': _cryptoWalletAddress,
+        'cryptoNetwork': _cryptoNetwork,
+        'lastUpdated': FieldValue.serverTimestamp(),
+      }, SetOptions(merge: true));
+    }
   }
 
   Future<void> _clearLocalBalances() async {
@@ -298,24 +352,32 @@ class UserProvider extends ChangeNotifier {
     }
   }
 
+  /// Resource-Optimized Score Submission with Time-Window Caching
   Future<void> updateHighScore(int newScore) async {
     final user = FirebaseAuth.instance.currentUser;
-    if (user == null) {
-      debugPrint("DEBUG: No User Logged In!");
-      return;
-    }
+    if (user == null) return;
 
-    if (newScore > _highScore) {
-      _highScore = newScore;
-      notifyListeners();
+    // SetOptions(merge: true) ka matlab hai ke purana score delete nahi hoga,
+    // bas "score" field update ho jayegi.
+    await _db.collection('scores').doc(user.uid).set({
+      'score': newScore,
+      'userId': user.uid,
+      'username': user.displayName ?? "Player",
+      'year': DateTime.now().year,
+      'weekOfYear': getIsoWeekNumber(DateTime.now()),
+      'month': DateTime.now().month,
+      'timestamp': FieldValue.serverTimestamp(),
+    });
 
-      await _db.collection('users').doc(user.uid).set({
-        'highScore': _highScore,
-        'displayName': user.displayName ?? "Snake Player",
-        'email': user.email,
-        'lastUpdated': FieldValue.serverTimestamp(),
-      }, SetOptions(merge: true));
-    }
+    notifyListeners();
+  }
+
+  int getIsoWeekNumber(DateTime date) {
+    final dayOfYear = int.parse(DateTime(date.year, date.month, date.day)
+        .difference(DateTime(date.year, 1, 1))
+        .inDays
+        .toString());
+    return ((dayOfYear - date.weekday + 10) / 7).floor();
   }
 
   Future<void> _syncBalancesToFirestore() async {
@@ -325,17 +387,21 @@ class UserProvider extends ChangeNotifier {
     if (docRef == null) return;
 
     try {
-      await docRef.set({
+      // UserModel ka instance banayen taaki sirf data wahi ho jo hum define kar chuke hain
+      final Map<String, dynamic> dataToSync = {
         'coins': _coins,
         'powerUps': _powerUps,
+        'highScore': _highScore,
         'lastUpdated': FieldValue.serverTimestamp(),
-      }, SetOptions(merge: true));
+      };
+
+      await docRef.set(dataToSync, SetOptions(merge: true));
+      debugPrint('Data synced successfully');
     } catch (e) {
       debugPrint('Failed to sync balances to Firestore: $e');
     }
   }
 
-  /// Resets in-memory state after sign-out.
   void resetLocalState() {
     _uid = null;
     _remoteLoaded = false;
@@ -343,6 +409,8 @@ class UserProvider extends ChangeNotifier {
     _powerUps = AppConstants.powerUps;
     _highScore = 0;
     _userName = "Player";
+    _cryptoWalletAddress = "";
+    _cryptoNetwork = "Solana";
     notifyListeners();
   }
 }

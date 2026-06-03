@@ -82,12 +82,15 @@ class _SpinWheelScreenState extends State<SpinWheelScreen> with SingleTickerProv
 
   // --- 4. SUB-WIDGETS ---
   Widget _buildControlPanel(SpinProvider prov) {
-
     final adProv = Provider.of<AdProvider>(context);
 
     int seconds = adProv.secondsRemaining;
-    // Change: Only say ad is "Ready" if the timer has hit zero
+
+    // An ad is ready only if we have one cached, haven't hit the daily limit, and cooldown is 0
     bool adReady = adProv.isRewardedReady && seconds == 0;
+
+    // CRITICAL GUARD: Check if the system is currently processing a load network call
+    bool isCurrentlyFetching = adProv.isAdLoading;
 
     return ClipRRect(
       child: BackdropFilter(
@@ -112,20 +115,21 @@ class _SpinWheelScreenState extends State<SpinWheelScreen> with SingleTickerProv
                   prov,
                   seconds > 0
                       ? "NEXT AD IN ${seconds}s"
-                      : (adReady ? "WATCH AD TO SPIN" : "LOADING AD..."),
-
+                      : (adReady
+                      ? "WATCH AD TO SPIN"
+                      : "LOADING AD..."),
                       () async {
-                    // 1. Call the method using the required callback parameter
                     await adProv.showRewardedAd(
                       onUserEarnedReward: (ad, reward) async {
-                        // 2. This code runs ONLY if the user finishes the ad
                         String? result = await prov.spin(_controller, rewards, false);
                         if (result != null) _handleReward(result);
                       },
                     );
                   },
                   adReady ? Colors.orangeAccent : Colors.grey,
-                  isTimerActive: seconds > 0 || !adReady,
+                  // FIXED: Disable the button immediately if a cooldown is active,
+                  // if an ad is not ready, OR if it's currently fetching in the background.
+                  isTimerActive: seconds > 0 || !adReady || isCurrentlyFetching,
                 )
               else
                 _statusText("DAILY LIMIT REACHED"),

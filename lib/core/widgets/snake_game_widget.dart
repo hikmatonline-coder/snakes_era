@@ -7,7 +7,7 @@ enum NPCType { beginner, noob, pro, legend }
 
 class Food {
   Offset pos;
-  final int type; // Add this if it is missing!
+  final int type;
   final Color color;
   final bool isLoot;
 
@@ -25,33 +25,42 @@ class NPCSnake {
   final NPCSize size;
 
   bool isBoosting = false;
-  int? targetFoodIndex;
   int decisionLock = 0;
-  double wanderAngle = 0.0; // For circular rotation
+  double wanderAngle = 0.0;
+
+  // --- New Core AI Fields ---
+  int defensiveCoilTicks = 0;
+  double coilDirection = 1.0;
 
   NPCSnake(this.pos, this.length, this.colors, this.rank, this.name, this.size)
-      : angle = Random().nextDouble() * 2 * pi {
+    : angle = Random().nextDouble() * 2 * pi {
     body = List.generate(length, (i) => pos);
-    wanderAngle = Random().nextDouble() * 0.02 - 0.01; // Unique drift for each bot
+    wanderAngle = Random().nextDouble() * 0.02 - 0.01;
   }
 
-  /// Base speed multiplier by size: smaller snakes faster, xlarge slower.
   double get baseSpeedForSize {
     switch (size) {
-      case NPCSize.small: return 1.15;
-      case NPCSize.medium: return 1.0;
-      case NPCSize.large: return 0.9;
-      case NPCSize.xlarge: return 0.8;
+      case NPCSize.small:
+        return 1.15;
+      case NPCSize.medium:
+        return 1.0;
+      case NPCSize.large:
+        return 0.9;
+      case NPCSize.xlarge:
+        return 0.8;
     }
   }
 
-  /// Turn agility by size: smaller snakes turn quicker, xlarge more sluggish.
   double get turnAgilityForSize {
     switch (size) {
-      case NPCSize.small: return 1.2;
-      case NPCSize.medium: return 1.0;
-      case NPCSize.large: return 0.85;
-      case NPCSize.xlarge: return 0.7;
+      case NPCSize.small:
+        return 1.2;
+      case NPCSize.medium:
+        return 1.0;
+      case NPCSize.large:
+        return 0.85;
+      case NPCSize.xlarge:
+        return 0.7;
     }
   }
 
@@ -62,135 +71,240 @@ class NPCSnake {
     return current + diff * lerpFactor;
   }
 
-  void think(List<Offset> playerBody, List<NPCSnake> otherNPCs, List<Food> foods, double worldSize) {
+  void think(
+    List<Offset> playerBody,
+    List<NPCSnake> otherNPCs,
+    List<Food> foods,
+    double worldSize,
+  ) {
+    var rng = Random();
     double targetA = angle;
     bool seesDanger = false;
-    double detectionRange = (rank == NPCType.legend || rank == NPCType.pro) ? 250.0 : 150.0;
+    double detectionRange = (rank == NPCType.legend || rank == NPCType.pro)
+        ? 280.0
+        : 180.0;
 
-    // 1. COLLISION AVOIDANCE (Anti-Head-On)
-    Offset lookAhead = pos + Offset(cos(angle) * detectionRange, sin(angle) * detectionRange);
+    // -------------------------------------------------------------
+    // ACTION 1: ACTIVE COILING DEFENSE
+    // -------------------------------------------------------------
+    if (defensiveCoilTicks > 0) {
+      angle += 0.24 * coilDirection;
+      defensiveCoilTicks--;
+      isBoosting = (rank != NPCType.noob);
+      return;
+    }
 
-    // 1. CHECK PLAYER FIRST (Always relevant if nearby)
-    if ((pos - playerBody.first).distance < 600) { // Broad filter
-      for (int i = 0; i < playerBody.length && i < 30; i += 5) {
-        if ((lookAhead - playerBody[i]).distance < 100) {
-          targetA = (pos - playerBody[i]).direction;
-          seesDanger = true;
-          break;
+    // -------------------------------------------------------------
+    // ACTION 2: THREE-PRONGED SIDE-STEP RADAR (Anti-Train Collision)
+    // -------------------------------------------------------------
+    // Project 3 danger zones: Left (-30°), Center (0°), and Right (+30°)
+    Offset lookLeft =
+        pos +
+        Offset(
+          cos(angle - pi / 6) * detectionRange,
+          sin(angle - pi / 6) * detectionRange,
+        );
+    Offset lookCenter =
+        pos + Offset(cos(angle) * detectionRange, sin(angle) * detectionRange);
+    Offset lookRight =
+        pos +
+        Offset(
+          cos(angle + pi / 6) * detectionRange,
+          sin(angle + pi / 6) * detectionRange,
+        );
+
+    bool threatLeft = false;
+    bool threatCenter = false;
+    bool threatRight = false;
+
+    // A. Scan Player Body
+    if (playerBody.isNotEmpty && (pos - playerBody.first).distance < 600) {
+      for (int i = 0; i < playerBody.length && i < 35; i += 5) {
+        if ((lookCenter - playerBody[i]).distance < 95) threatCenter = true;
+        if ((lookLeft - playerBody[i]).distance < 95) threatLeft = true;
+        if ((lookRight - playerBody[i]).distance < 95) threatRight = true;
+      }
+    }
+
+    // B. Scan Other NPCs
+    for (var other in otherNPCs) {
+      if (identical(other, this)) continue;
+      if ((pos - other.pos).distance > 400) continue;
+
+      for (int i = 0; i < other.body.length && i < 35; i += 5) {
+        if ((lookCenter - other.body[i]).distance < 95) threatCenter = true;
+        if ((lookLeft - other.body[i]).distance < 95) threatLeft = true;
+        if ((lookRight - other.body[i]).distance < 95) threatRight = true;
+      }
+    }
+
+    // C. Handle Smart Side-Stepping Evasion
+    if (threatCenter || threatLeft || threatRight) {
+      seesDanger = true;
+      isBoosting = (rank != NPCType.noob);
+      decisionLock = 10;
+
+      if (threatCenter && !threatLeft && !threatRight) {
+        // Direct head-on train scenario: Arbitrarily dodge hard to one side
+        targetA = angle + (rng.nextBool() ? pi / 2 : -pi / 2);
+      } else if (threatLeft && !threatRight) {
+        // Threat is on the left side, escape hard to the right side
+        targetA = angle + pi / 3;
+      } else if (threatRight && !threatLeft) {
+        // Threat is on the right side, escape hard to the left side
+        targetA = angle - pi / 3;
+      } else {
+        // Surrounded or cut off: Try an emergency fallback break direction
+        targetA = angle + pi;
+
+        // High-rank snakes activate Coiling Circle Defense if fully cornered
+        if (rng.nextDouble() < 0.50 && body.length > 25) {
+          defensiveCoilTicks = rng.nextInt(12) + 20;
+          coilDirection = rng.nextBool() ? 1.0 : -1.0;
+          return;
         }
       }
     }
 
-    // 2. CHECK OTHER NPCs (With the distance filter)
+    // D. Border containment checks
     if (!seesDanger) {
-      for (var other in otherNPCs) {
-        if (other == this) continue;
-
-        // PERFORMANCE FILTER: Skip if they are too far away to matter
-        // This is the line that saves the Nubia's CPU
-        if ((pos - other.pos).distance > 400) continue;
-
-        // Only check the segments if the snake is actually close
-        for (int i = 0; i < other.body.length && i < 30; i += 5) {
-          if ((lookAhead - other.body[i]).distance < 100) {
-            targetA = (pos - other.body[i]).direction;
-            seesDanger = true;
-            isBoosting = (rank != NPCType.noob);
-            decisionLock = 15;
-            break;
-          }
-        }
-        if (seesDanger) break;
-      }
-    }
-
-    // 2. WORLD BORDERS
-    if (!seesDanger) {
-      double margin = 400.0;
-      if (pos.dx < margin || pos.dx > worldSize - margin || pos.dy < margin || pos.dy > worldSize - margin) {
+      double margin = 350.0;
+      if (pos.dx < margin ||
+          pos.dx > worldSize - margin ||
+          pos.dy < margin ||
+          pos.dy > worldSize - margin) {
         targetA = (Offset(worldSize / 2, worldSize / 2) - pos).direction;
         seesDanger = true;
+        isBoosting = false;
       }
     }
 
-    // 3. CATEGORY BEHAVIOR (Food & Wandering)
+    // -------------------------------------------------------------
+    // ACTION 3: HUNT ENEMIES & TRAIL LOOT PRIORITIZATION
+    // -------------------------------------------------------------
     if (!seesDanger && decisionLock <= 0) {
       isBoosting = false;
+      Offset? currentTargetDestination;
 
-      if (foods.isNotEmpty && (rank == NPCType.pro || rank == NPCType.legend || Random().nextDouble() > 0.7)) {
-        // Hunt Food
-        if (targetFoodIndex == null || targetFoodIndex! >= foods.length) {
-          _findNearestFood(foods);
+      // --- OFFENSIVE HUNTER MODE ---
+      double optimalHuntDistance = 350.0;
+
+      if (playerBody.isNotEmpty && rank != NPCType.noob) {
+        double dToPlayer = (pos - playerBody.first).distance;
+        if (dToPlayer < optimalHuntDistance &&
+            body.length > playerBody.length * 0.7) {
+          optimalHuntDistance = dToPlayer;
+          currentTargetDestination = playerBody.first;
+          if (dToPlayer < 140.0 && rank == NPCType.legend) isBoosting = true;
         }
-        if (targetFoodIndex != null) {
-          targetA = (foods[targetFoodIndex!].pos - pos).direction;
-          // Legend/Pro bots boost toward large food
-          if (foods[targetFoodIndex!].type > 0 && rank == NPCType.legend) isBoosting = true;
+      }
+
+      for (var enemy in otherNPCs) {
+        if (identical(enemy, this)) continue;
+        double dToEnemy = (pos - enemy.pos).distance;
+        if (dToEnemy < optimalHuntDistance && body.length > enemy.body.length) {
+          optimalHuntDistance = dToEnemy;
+          currentTargetDestination = enemy.pos;
+          if (dToEnemy < 140.0 &&
+              (rank == NPCType.pro || rank == NPCType.legend))
+            isBoosting = true;
         }
+      }
+
+      // --- CRITICAL FOOD SEARCH REMAP ---
+      if (currentTargetDestination == null && foods.isNotEmpty) {
+        double highestCalculatedFoodPriority = 0.0;
+        Food? optimalFoodTarget;
+
+        // FIX: Pro and Legend bots now read EVERY food item (increment by 1)
+        // to instantly catch trail loots when a snake drops dead next to them.
+        int step = (rank == NPCType.legend || rank == NPCType.pro) ? 1 : 4;
+
+        for (int i = 0; i < foods.length; i += step) {
+          double dist = (pos - foods[i].pos).distance;
+          if (dist > 600.0) continue; // Broadened vision awareness range
+
+          // Trail loot drops receive a massive math weighting modifier over static dots
+          double situationalWeight =
+              (foods[i].isLoot ? 12.0 : 1.0) / (dist + 1.0);
+
+          if (situationalWeight > highestCalculatedFoodPriority) {
+            highestCalculatedFoodPriority = situationalWeight;
+            optimalFoodTarget = foods[i];
+          }
+        }
+
+        if (optimalFoodTarget != null) {
+          currentTargetDestination = optimalFoodTarget.pos;
+          // If it's loot, engage boost to steal it before anyone else does
+          if (optimalFoodTarget.isLoot && rank != NPCType.noob) {
+            isBoosting = true;
+          }
+        }
+      }
+
+      // --- FINAL STEERING ASSIGNMENT ---
+      if (currentTargetDestination != null) {
+        targetA = (currentTargetDestination - pos).direction;
       } else {
-        // CIRCULAR ROTATION (Wandering)
+        // CIRCULAR WANDER ROUTINE
         targetA = angle + wanderAngle;
-        if (Random().nextInt(100) == 0) wanderAngle = Random().nextDouble() * 0.04 - 0.02;
+        if (rng.nextInt(80) == 0) wanderAngle = rng.nextDouble() * 0.04 - 0.02;
       }
     }
 
     if (decisionLock > 0) decisionLock--;
 
-    // Rank-based turning speed, then modulated by size for smooth movement
-    double baseTurn = (rank == NPCType.legend) ? 0.20 : (rank == NPCType.pro ? 0.15 : 0.08);
-    double turnSpeed = (baseTurn * turnAgilityForSize).clamp(0.05, 0.25);
+    double baseTurn = (rank == NPCType.legend)
+        ? 0.24
+        : (rank == NPCType.pro ? 0.18 : 0.10);
+    double turnSpeed = (baseTurn * turnAgilityForSize).clamp(0.05, 0.28);
     angle = _lerpAngle(angle, targetA, turnSpeed);
   }
 
-  void _findNearestFood(List<Food> foods) {
-    double closestDist = 600 * 600; // Only care about food within 600px
-    int? closestIndex;
-    for (int i = 0; i < foods.length; i += 10) {
-      double d = (pos - foods[i].pos).distanceSquared;
-      if (d < closestDist) {
-        closestDist = d;
-        closestIndex = i;
-      }
+  void grow(int amount) {
+    length += amount; // Increases length threshold target constraints
+    if (body.isEmpty) {
+      body = List.generate(amount, (i) => pos);
+      return;
     }
-    targetFoodIndex = closestIndex;
+
+    Offset tailSegment = body.last;
+    for (int i = 0; i < amount; i++) {
+      body.add(tailSegment);
+    }
   }
 
   void move(double speed, double dt) {
-    // 1. Calculate per-second speed
     double moveSpeed = speed * baseSpeedForSize * 60.0;
 
-    // 2. Move the head
-    Offset oldPos = pos;
-    pos += Offset(
-        cos(angle) * moveSpeed * dt,
-        sin(angle) * moveSpeed * dt
-    );
+    pos += Offset(cos(angle) * moveSpeed * dt, sin(angle) * moveSpeed * dt);
 
-    // 3. Spacing logic
     double baseSpacing = 4.0;
-    double spacingValue = baseSpacing * (
-        size == NPCSize.small ? 0.9 :
-        (size == NPCSize.xlarge ? 1.15 :
-        (size == NPCSize.large ? 1.08 : 1.0))
-    );
+    double spacingValue =
+        baseSpacing *
+        (size == NPCSize.small
+            ? 0.9
+            : (size == NPCSize.xlarge
+                  ? 1.15
+                  : (size == NPCSize.large ? 1.08 : 1.0)));
     if (isBoosting) spacingValue *= 1.1;
 
-    // 4. THE FIX: Interpolate segments to fill gaps
     if (body.isEmpty) {
       body.insert(0, pos);
     } else {
       double distSinceLast = (pos - body.first).distance;
 
-      // While the gap is bigger than our spacing, add "filler" segments
-      while (distSinceLast > spacingValue) {
+      int safetyCap = 0;
+      while (distSinceLast > spacingValue && safetyCap < 6) {
         double ratio = spacingValue / distSinceLast;
         Offset fillerPos = Offset.lerp(body.first, pos, ratio)!;
         body.insert(0, fillerPos);
         distSinceLast = (pos - body.first).distance;
+        safetyCap++;
       }
     }
 
-    // 5. Trim the tail
     while (body.length > length) {
       body.removeLast();
     }

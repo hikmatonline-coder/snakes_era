@@ -30,7 +30,7 @@ class _ShopScreenState extends State<ShopScreen> {
       body: ListView(
         padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 24),
         children: [
-          // // --- Section 1: Daily Missions ---
+          // --- Section 1: Daily Missions ---
           _section(context, "DAILY MISSIONS"),
           const SizedBox(height: 12),
           _missionCard(context, user, adProv, "Quick Pulse", 3, 20, "m1"),
@@ -39,7 +39,7 @@ class _ShopScreenState extends State<ShopScreen> {
 
           const SizedBox(height: 32),
 
-          // --- Section 3: Resource Exchange ---
+          // --- Section 2: Resource Exchange ---
           _section(context, "RESOURCE EXCHANGE"),
           const SizedBox(height: 12),
           _tradeCard(
@@ -94,11 +94,12 @@ class _ShopScreenState extends State<ShopScreen> {
             ),
           ),
 
-          // --- Section 2.5: Snake Skins ---
+          const SizedBox(height: 32),
+
+          // --- Section 3: Snake Skins ---
           _section(context, "SNAKE SKINS"),
           const SizedBox(height: 12),
 
-          // Categorized Rows
           _buildCategoryRow(context, user, "COMMON", SkinRarity.common),
           _buildCategoryRow(context, user, "RARE", SkinRarity.rare),
           _buildCategoryRow(context, user, "EPIC", SkinRarity.epic),
@@ -122,8 +123,8 @@ class _ShopScreenState extends State<ShopScreen> {
         borderRadius: BorderRadius.circular(24),
         color: isDark ? Colors.white.withOpacity(0.05) : colorScheme.primary.withOpacity(0.05),
         border: Border.all(
-          color: isReady ? AppConstants.deepPurpleColor : colorScheme.outlineVariant.withOpacity(0.5),
-          width: isReady ? 2 : 1,
+          color: isReady && !user.isRewardClaimed(id) ? AppConstants.deepPurpleColor : colorScheme.outlineVariant.withOpacity(0.5),
+          width: isReady && !user.isRewardClaimed(id) ? 2 : 1,
         ),
       ),
       child: ClipRRect(
@@ -134,7 +135,7 @@ class _ShopScreenState extends State<ShopScreen> {
             padding: const EdgeInsets.all(16),
             child: Row(
               children: [
-                _buildProgressCircle(progress, colorScheme),
+                _buildProgressCircle(progress, colorScheme, user.isRewardClaimed(id)),
                 const SizedBox(width: 16),
                 Expanded(
                   child: Column(
@@ -154,7 +155,7 @@ class _ShopScreenState extends State<ShopScreen> {
     );
   }
 
-  Widget _buildProgressCircle(double progress, ColorScheme colorScheme) {
+  Widget _buildProgressCircle(double progress, ColorScheme colorScheme, bool isClaimed) {
     bool isReady = progress >= 1.0;
     return Stack(
       alignment: Alignment.center,
@@ -163,16 +164,16 @@ class _ShopScreenState extends State<ShopScreen> {
           width: 42,
           height: 42,
           child: CircularProgressIndicator(
-            value: progress,
+            value: isClaimed ? 1.0 : progress,
             strokeWidth: 4,
             backgroundColor: colorScheme.outlineVariant.withOpacity(0.2),
-            color: isReady ? Colors.greenAccent : colorScheme.primary,
+            color: isClaimed || isReady ? Colors.greenAccent : colorScheme.primary,
           ),
         ),
         Icon(
-          isReady ? Icons.check : Icons.access_time_filled,
+          isClaimed || isReady ? Icons.check : Icons.access_time_filled,
           size: 18,
-          color: isReady ? Colors.greenAccent : colorScheme.onSurfaceVariant,
+          color: isClaimed || isReady ? Colors.greenAccent : colorScheme.onSurfaceVariant,
         ),
       ],
     );
@@ -182,19 +183,19 @@ class _ShopScreenState extends State<ShopScreen> {
     final isClaimed = user.isRewardClaimed(id);
     final colorScheme = Theme.of(context).colorScheme;
 
-    // Logic: Is the mission done, not claimed, AND is an ad actually ready?
     bool adIsReady = adProv.isRewardedReady;
-    bool canClick = isReady && !isClaimed && adIsReady;
-    bool isWaitingForAd = isReady && !isClaimed && !adIsReady;
+    int cooldown = adProv.secondsRemaining;
+    bool isNetworkLoading = adProv.isAdLoading;
+
+    // Fixed Action Conditions
+    bool canClick = isReady && !isClaimed && adIsReady && cooldown == 0 && !isNetworkLoading;
+    bool showSpinner = isReady && !isClaimed && (isNetworkLoading || (!adIsReady && cooldown == 0));
 
     return ElevatedButton(
       onPressed: canClick
           ? () async {
-        // 1. Call the new method name
         await adProv.showRewardedAd(
-          // 2. Pass the logic into the required callback
           onUserEarnedReward: (ad, rewardItem) {
-            // This runs only after the ad is finished
             user.claimTimeReward(id, reward);
             _showSuccessDialog(context, Colors.greenAccent);
           },
@@ -206,27 +207,31 @@ class _ShopScreenState extends State<ShopScreen> {
             ? Colors.transparent
             : (canClick ? AppConstants.deepPurpleColor : colorScheme.surfaceContainer),
         foregroundColor: isClaimed ? colorScheme.onSurface : colorScheme.onPrimary,
+        disabledBackgroundColor: isClaimed ? Colors.transparent : colorScheme.surfaceContainer.withOpacity(0.5),
+        disabledForegroundColor: isClaimed ? colorScheme.onSurfaceVariant.withOpacity(0.4) : colorScheme.onSurfaceVariant,
         elevation: canClick ? 4 : 0,
         shape: RoundedRectangleBorder(
           borderRadius: BorderRadius.circular(12),
           side: isClaimed ? BorderSide(color: colorScheme.outlineVariant) : BorderSide.none,
         ),
       ),
-      child: isWaitingForAd
-          ? SizedBox(
+      child: showSpinner
+          ? const SizedBox(
         width: 18,
         height: 18,
         child: CircularProgressIndicator(
           strokeWidth: 2,
-          color: colorScheme.primary,
+          color: AppConstants.deepPurpleColor,
         ),
       )
           : Text(
         isClaimed
             ? "DONE"
-            : (adProv.secondsRemaining > 0
-            ? "${adProv.secondsRemaining}s"
-            : "CLAIM"),
+            : (!isReady
+            ? "LOCKED"
+            : (cooldown > 0
+            ? "${cooldown}s"
+            : "CLAIM")),
       ),
     );
   }
@@ -252,7 +257,6 @@ class _ShopScreenState extends State<ShopScreen> {
   }
 
   Widget _buildCategoryRow(BuildContext context, UserProvider user, String title, SkinRarity rarity) {
-    // Filter skins for this specific category
     final categorySkins = snakeSkins.where((s) => s.rarity == rarity).toList();
 
     if (categorySkins.isEmpty) return const SizedBox.shrink();
@@ -295,26 +299,23 @@ class _ShopScreenState extends State<ShopScreen> {
   }
 
   Widget _skinCard(BuildContext context, SnakeSkin skin, bool isOwned, bool isSelected, UserProvider user) {
-
     final colorScheme = Theme.of(context).colorScheme;
     final displayColor = skin.rarity != null ? skin.rarityColor : Colors.grey;
 
     return Container(
-      width: 150, // Slightly wider for the tag
+      width: 150,
       margin: const EdgeInsets.only(right: 12),
       padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 12),
       decoration: BoxDecoration(
         color: colorScheme.surfaceContainer,
         borderRadius: BorderRadius.circular(24),
         border: Border.all(
-          // The border now glows with the rarity color if selected!
           color: isSelected ? displayColor : colorScheme.outlineVariant.withOpacity(0.5),
           width: isSelected ? 3 : 1,
         ),
       ),
       child: Column(
         children: [
-          // --- RARITY TAG ---
           Container(
             padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
             decoration: BoxDecoration(
@@ -326,13 +327,12 @@ class _ShopScreenState extends State<ShopScreen> {
               style: TextStyle(color: displayColor, fontSize: 9, fontWeight: FontWeight.bold),
             ),
           ),
-
           Expanded(
             child: Center(
               child: Transform.scale(
-                scale: 0.5, // Slightly larger than before for better visibility
+                scale: 0.5,
                 child: CustomPaint(
-                  size: const Size(100, 100), // Give it a base size
+                  size: const Size(100, 100),
                   painter: SimpleSnakePainter(
                     bodyColors: skin.bodyColors,
                     eyeColor: skin.eyeColor,
@@ -342,11 +342,8 @@ class _ShopScreenState extends State<ShopScreen> {
               ),
             ),
           ),
-
-          Text(skin.name, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13)),
-
+          Text(skin.name, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13), overflow: TextOverflow.ellipsis),
           const SizedBox(height: 8),
-
           ElevatedButton(
             style: ElevatedButton.styleFrom(
               backgroundColor: isSelected ? Colors.green : (isOwned ? colorScheme.primary : skin.rarityColor),
@@ -390,7 +387,7 @@ class _ShopScreenState extends State<ShopScreen> {
     showDialog(
       context: context,
       builder: (context) => AlertDialog(
-        backgroundColor: AppConstants.backgroundColor.withOpacity(0.95),
+        backgroundColor: Colors.black.withOpacity(0.95),
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(24), side: BorderSide(color: color.withOpacity(0.3))),
         title: Column(children: [Icon(icon, color: color, size: 48), const SizedBox(height: 16), Text(title, style: TextStyle(color: color, fontWeight: FontWeight.bold))]),
         content: Text(message, textAlign: TextAlign.center, style: const TextStyle(color: Colors.white70)),

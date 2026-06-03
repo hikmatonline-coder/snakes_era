@@ -8,7 +8,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import '../core/ad_helper.dart';
 import '../core/ads_initializer.dart';
 
-class AdProvider extends ChangeNotifier {
+class AdProvider with ChangeNotifier {
 
   static const String _appOpenCountKey = 'app_open_count';
   static const int _showAppOpenEveryNthOpen = 3;
@@ -23,9 +23,7 @@ class AdProvider extends ChangeNotifier {
   bool _isShowingAppOpenAd = false;
 
   bool get isShowingAppOpenAd => _isShowingAppOpenAd;
-
   RewardedAd? get rewardedAd => _rewardedAd;
-  RewardedInterstitialAd? _rewardedInterstitialAd;
 
   // State Variables
   DateTime? _lastAdTimestamp;
@@ -34,13 +32,17 @@ class AdProvider extends ChangeNotifier {
   final int _cooldownSeconds = 30;
   bool _isAdLoading = false;
 
+  // Exponential Backoff Retry tracking to satisfy Google Policies
+  int _rewardedRetryAttempts = 0;
+  int _interstitialRetryAttempts = 0;
+  int _appOpenRetryAttempts = 0;
+
   // Getters
   bool get isAdLoading => _isAdLoading;
   int get dailyAdsWatched => _dailyAdsWatched;
   bool get reachedLimit => _dailyAdsWatched >= _maxDailyAds;
   InterstitialAd? get interstitialAd => _interstitialAd;
 
-  // 1. Add this helper to check if an ad is ready to show
   bool get isRewardedReady => _rewardedAd != null && !reachedLimit;
 
   int get secondsRemaining {
@@ -57,7 +59,6 @@ class AdProvider extends ChangeNotifier {
   Future<void> _init() async {
     final prefs = await SharedPreferences.getInstance();
 
-    // 1. Daily Reset Logic
     String? lastDate = prefs.getString('last_ad_date');
     String today = DateTime.now().toIso8601String().split('T')[0];
 
@@ -69,16 +70,13 @@ class AdProvider extends ChangeNotifier {
       _dailyAdsWatched = prefs.getInt('daily_ads_watched') ?? 0;
     }
 
-    // 2. Load Cooldown Timestamp
     int? lastMillis = prefs.getInt('last_ad_timestamp');
     if (lastMillis != null) {
       _lastAdTimestamp = DateTime.fromMillisecondsSinceEpoch(lastMillis);
     }
 
-    // 3. Load ads only after UMP + Mobile Ads SDK are ready
     await _startAdsWhenReady();
 
-    // 4. UI Refresh Ticker
     Timer.periodic(const Duration(seconds: 1), (timer) {
       if (secondsRemaining > 0) notifyListeners();
     });
@@ -125,7 +123,7 @@ class AdProvider extends ChangeNotifier {
     }
   }
 
-  // --- App Open Ad (every 3rd app open) ---
+  // --- App Open Ad ---
   void loadAppOpenAd() {
     if (_isLoadingAppOpenAd || _isAppOpenAdAvailable) return;
 
@@ -139,6 +137,7 @@ class AdProvider extends ChangeNotifier {
           _appOpenAd = ad;
           _appOpenAdLoadTime = DateTime.now();
           _isLoadingAppOpenAd = false;
+          _appOpenRetryAttempts = 0; // Reset retry counter
           debugPrint('AppOpenAd loaded');
         },
         onAdFailedToLoad: (error) {
@@ -146,7 +145,11 @@ class AdProvider extends ChangeNotifier {
           _appOpenAdLoadTime = null;
           _isLoadingAppOpenAd = false;
           _logAd('AppOpenAd failed (${AdHelper.appOpenAdUnitId})', error: error);
-          Future.delayed(const Duration(seconds: 8), loadAppOpenAd);
+
+          // Exponential backoff to prevent network flooding (Max 1 minute delay)
+          _appOpenRetryAttempts++;
+          int delaySeconds = (_appOpenRetryAttempts * 10).clamp(10, 60);
+          Future.delayed(Duration(seconds: delaySeconds), loadAppOpenAd);
         },
       ),
     );
@@ -157,7 +160,6 @@ class AdProvider extends ChangeNotifier {
     return DateTime.now().difference(_appOpenAdLoadTime!) < _appOpenAdMaxCache;
   }
 
-  /// Called when the app enters foreground. Shows an app-open ad every 3rd open.
   Future<void> onAppOpen() async {
     if (_isShowingAppOpenAd) return;
 
@@ -225,6 +227,7 @@ class AdProvider extends ChangeNotifier {
           _appOpenAd = ad;
           _appOpenAdLoadTime = DateTime.now();
           _isLoadingAppOpenAd = false;
+          _appOpenRetryAttempts = 0;
           if (!completer.isCompleted) completer.complete();
         },
         onAdFailedToLoad: (error) {
@@ -244,22 +247,7 @@ class AdProvider extends ChangeNotifier {
     }
   }
 
-  // --- 1. Banner Ad ---
-  // BannerAd createBannerAd() {
-  //   return BannerAd(
-  //     adUnitId: _bannerId,
-  //     size: AdSize.banner,
-  //     request: const AdRequest(),
-  //     listener: BannerAdListener(
-  //       onAdFailedToLoad: (ad, error) {
-  //         debugPrint("Banner failed: $error");
-  //         ad.dispose();
-  //       },
-  //     ),
-  //   )..load();
-  // }
-
-  // --- 2. Interstitial Ad ---
+  // --- Interstitial Ad ---
   void loadInterstitialAd() {
     if (_interstitialAd != null) return;
 
@@ -269,12 +257,16 @@ class AdProvider extends ChangeNotifier {
       adLoadCallback: InterstitialAdLoadCallback(
         onAdLoaded: (ad) {
           _interstitialAd = ad;
+          _interstitialRetryAttempts = 0; // Reset retries
           notifyListeners();
         },
         onAdFailedToLoad: (error) {
           _logAd('InterstitialAd failed (${AdHelper.interstitialAdUnitId})', error: error);
           _interstitialAd = null;
-          Future.delayed(const Duration(seconds: 8), loadInterstitialAd);
+
+          _interstitialRetryAttempts++;
+          int delaySeconds = (_interstitialRetryAttempts * 15).clamp(15, 120);
+          Future.delayed(Duration(seconds: delaySeconds), loadInterstitialAd);
         },
       ),
     );
@@ -290,10 +282,12 @@ class AdProvider extends ChangeNotifier {
         ad.dispose();
         _interstitialAd = null;
         loadInterstitialAd();
-        completer.complete(); // This tells the game screen it's safe to resume
+        completer.complete();
       },
       onAdFailedToShowFullScreenContent: (ad, err) {
         ad.dispose();
+        _interstitialAd = null;
+        loadInterstitialAd();
         completer.complete();
       },
     );
@@ -302,9 +296,8 @@ class AdProvider extends ChangeNotifier {
     return completer.future;
   }
 
-  // --- 3. Rewarded Ad (Main handler for NoLivesSheet) ---
+  // --- Rewarded Ad ---
   void loadRewardedAd() {
-    // If already loading, or we have an ad, or reached limit, don't trigger another fetch
     if (_isAdLoading || _rewardedAd != null || reachedLimit) return;
 
     _isAdLoading = true;
@@ -317,6 +310,7 @@ class AdProvider extends ChangeNotifier {
         onAdLoaded: (ad) {
           _rewardedAd = ad;
           _isAdLoading = false;
+          _rewardedRetryAttempts = 0; // Reset safe retries
           debugPrint("Rewarded Ad Loaded");
           notifyListeners();
         },
@@ -325,7 +319,11 @@ class AdProvider extends ChangeNotifier {
           _isAdLoading = false;
           _logAd('RewardedAd failed (${AdHelper.rewardedAdUnitId})', error: err);
           notifyListeners();
-          Future.delayed(const Duration(seconds: 8), loadRewardedAd);
+
+          // CRITICAL REVIEW FIX: Prevents rapid fires when network errors happen
+          _rewardedRetryAttempts++;
+          int delaySeconds = (_rewardedRetryAttempts * 15).clamp(15, 120);
+          Future.delayed(Duration(seconds: delaySeconds), loadRewardedAd);
         },
       ),
     );
@@ -335,17 +333,24 @@ class AdProvider extends ChangeNotifier {
     if (_rewardedAd == null) return;
 
     final adToShow = _rewardedAd;
-    _rewardedAd = null; // Clear immediately to prevent double-tap issues
+    _rewardedAd = null; // Instantly dump pointer to prevent spam triggers
 
     _isAdLoading = true;
     notifyListeners();
+
+    bool rewardedEarned = false;
 
     adToShow!.fullScreenContentCallback = FullScreenContentCallback(
       onAdDismissedFullScreenContent: (ad) {
         ad.dispose();
         _isAdLoading = false;
-        // Start cooldown then reload
-        Future.delayed(Duration(seconds: _cooldownSeconds), () => loadRewardedAd());
+        notifyListeners();
+
+        // CRITICAL FIX: Only kick-start cooldown here if the user backed out early.
+        // If they completed the ad, _recordRewardSuccess handled the scheduling.
+        if (!rewardedEarned) {
+          Future.delayed(Duration(seconds: _cooldownSeconds), () => loadRewardedAd());
+        }
       },
       onAdFailedToShowFullScreenContent: (ad, err) {
         ad.dispose();
@@ -354,41 +359,12 @@ class AdProvider extends ChangeNotifier {
       },
     );
 
-    // Use the callback passed from the Game Screen
     await adToShow.show(onUserEarnedReward: (ad, reward) async {
+      rewardedEarned = true; // Mark true so onAdDismissed doesn't double-call loader
       await _recordRewardSuccess();
-      onUserEarnedReward(ad, reward); // Execute the revive or double score logic
+      onUserEarnedReward(ad, reward);
     });
   }
-
-  // --- 4. Rewarded Interstitial ---
-  // void _loadRewardedInterstitial() {
-  //   RewardedInterstitialAd.load(
-  //     adUnitId: _rewardedInterstitialId,
-  //     request: const AdRequest(),
-  //     rewardedInterstitialAdLoadCallback: RewardedInterstitialAdLoadCallback(
-  //       onAdLoaded: (ad) => _rewardedInterstitialAd = ad,
-  //       onAdFailedToLoad: (err) => _rewardedInterstitialAd = null,
-  //     ),
-  //   );
-  // }
-  //
-  // Future<bool> showRewardedInterstitial() async {
-  //   if (_rewardedInterstitialAd == null || reachedLimit) return false;
-  //   Completer<bool> completer = Completer();
-  //
-  //   await _rewardedInterstitialAd!.show(onUserEarnedReward: (_, reward) async {
-  //     await _recordRewardSuccess();
-  //     completer.complete(true);
-  //   });
-  //
-  //   _rewardedInterstitialAd = null;
-  //   _loadRewardedInterstitial();
-  //   return completer.future;
-  // }
-
-  // --- Helper: Save States ---
-  // Inside AdProvider.dart
 
   Future<void> _recordRewardSuccess() async {
     _lastAdTimestamp = DateTime.now();
@@ -398,13 +374,11 @@ class AdProvider extends ChangeNotifier {
     await prefs.setInt('daily_ads_watched', _dailyAdsWatched);
     await prefs.setInt('last_ad_timestamp', _lastAdTimestamp!.millisecondsSinceEpoch);
 
-    // 2. Clear the current ad
     _rewardedAd = null;
-
-    // 3. WAIT before loading the next ad (The 20-30s cooldown you requested)
-    // This prevents spamming the Google Servers
+    _isAdLoading = false;
     notifyListeners();
 
+    // Safe cooldown execution
     Future.delayed(Duration(seconds: _cooldownSeconds), () {
       loadRewardedAd();
     });
