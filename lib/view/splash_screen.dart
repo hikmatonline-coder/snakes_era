@@ -1,9 +1,71 @@
 import 'package:flutter/material.dart';
+import '../auth/auth_wrapper.dart';
 import '../core/constants.dart';
 import '../core/painters/logo_painter.dart';
+import '../services/app_config_services.dart';
 
-class SplashScreen extends StatelessWidget {
+class SplashScreen extends StatefulWidget {
   const SplashScreen({super.key});
+
+  @override
+  State<SplashScreen> createState() => _SplashScreenState();
+}
+
+class _SplashScreenState extends State<SplashScreen> {
+
+  @override
+  void initState() {
+    super.initState();
+    _checkUpdateAndNavigate();
+  }
+
+  Future<void> _checkUpdateAndNavigate() async {
+
+    var updateData = await AppConfigService.instance.getUpdateStatus();
+
+    if (!mounted) return;
+
+    if (updateData['isRequired']) {
+      _showUpdateDialog(
+          context,
+          updateData['currentVersion'],
+          updateData['minVersion']
+      );
+    } else {
+      Navigator.pushReplacement(context, MaterialPageRoute(builder: (_) => const AuthWrapper()));
+    }
+  }
+
+  void _showUpdateDialog(BuildContext context, String current, String min) {
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (ctx) => AlertDialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+        title: const Row(
+          children: [
+            Icon(Icons.system_update, color: Colors.blue),
+            SizedBox(width: 10),
+            Text("Update Required"),
+          ],
+        ),
+        content: Text(
+          "Aapka version: $current \nRequired version: $min \n\nPlease update to continue.",
+          style: const TextStyle(fontSize: 16),
+        ),
+        actions: [
+          ElevatedButton(
+            style: ElevatedButton.styleFrom(
+              backgroundColor: AppConstants.primaryColor,
+              foregroundColor: Colors.white,
+            ),
+            onPressed: () => AppConfigService.instance.launchStore(),
+            child: const Text("UPDATE NOW"),
+          ),
+        ],
+      ),
+    );
+  }
 
   @override
   Widget build(BuildContext context) {
