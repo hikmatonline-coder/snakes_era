@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
+import 'package:snakes_era/core/widgets/referral_dialogs.dart';
 import 'package:snakes_era/view/navigation_screens/profile_screen/team_screen.dart';
 import '../../../core/constants.dart';
 import '../../../provider/auth_provider.dart';
@@ -17,22 +18,31 @@ class ProfileScreen extends StatefulWidget {
 }
 
 class _ProfileScreenState extends State<ProfileScreen> {
-  @override
 
+  bool _isCheckingReferral = false;
 
   @override
   void initState() {
     super.initState();
-    WidgetsBinding.instance.addPostFrameCallback((_) async {
-      final authProvider = Provider.of<AuthProvider>(context, listen: false);
-      final socialProvider = Provider.of<SocialProvider>(context, listen: false);
-
-      bool showPopup = await socialProvider.shouldShowReferralPopup(authProvider.user?.referredBy);
-
-      if (showPopup) {
-        _showReferralDialog(context);
-      }
+    // 1. Post-frame callback mein check zaroori hai
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _checkReferralStatus();
     });
+  }
+
+  Future<void> _checkReferralStatus() async {
+    if (_isCheckingReferral || !mounted) return;
+
+    setState(() => _isCheckingReferral = true);
+
+    final authProvider = Provider.of<AuthProvider>(context, listen: false);
+    final socialProvider = Provider.of<SocialProvider>(context, listen: false);
+
+    bool showPopup = await socialProvider.shouldShowReferralPopup(authProvider.user?.referredBy);
+
+    if (mounted && showPopup) {
+      ReferralDialogs.showRedeemDialog(context);
+    }
   }
 
   @override
@@ -68,7 +78,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
             ),
             _buildSettingTile(context, icon: Icons.card_giftcard, title: "Redeem Referral Code",
               trailing: const Icon(Icons.edit, size: 16),
-              onTap: () => _showReferralDialog(context),
+              onTap: () => ReferralDialogs.showRedeemDialog(context),
             ),
             _buildSettingTile(context, icon: Icons.group, title: "My Team",
                 trailing: const Icon(Icons.chevron_right),
@@ -76,12 +86,13 @@ class _ProfileScreenState extends State<ProfileScreen> {
             ),
             _buildSettingTile(context, icon: Icons.share, title: "Invite & Earn",
                 trailing: const Icon(Icons.chevron_right),
-                onTap: () => context.read<SocialProvider>().shareReferralCode(user?.id ?? "")
+                onTap: () => context.read<SocialProvider>().shareReferralCode(context.read<UserProvider>().referralCode)
             ),
             _buildSettingTile(context, icon: Icons.copy, title: "Copy Referral Code",
                 trailing: const Icon(Icons.chevron_right),
                 onTap: () {
-                  Clipboard.setData(ClipboardData(text: user?.id ?? ""));
+                  final code = context.read<UserProvider>().referralCode;
+                  Clipboard.setData(ClipboardData(text: code ?? ""));
                   ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("Code Copied!")));
                 }),
             _buildSettingTile(context, icon: Icons.shield, title: "Privacy Policy",
@@ -124,72 +135,4 @@ class _ProfileScreenState extends State<ProfileScreen> {
       ),
     );
   }
-}
-
-void _showReferralDialog(BuildContext context) {
-  String code = "";
-  showDialog(
-    context: context,
-    builder: (ctx) => Dialog(
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
-      child: Padding(
-        padding: const EdgeInsets.all(24.0),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            const Icon(Icons.card_giftcard, size: 60, color: Colors.amber), // Gift Icon
-            const SizedBox(height: 16),
-            const Text("Unlock Rewards!", style: TextStyle(fontSize: 22, fontWeight: FontWeight.bold)),
-            const SizedBox(height: 8),
-            const Text("Enter your friend's code to claim 30 Coins & 3 PowerUps instantly!",
-                textAlign: TextAlign.center, style: TextStyle(color: Colors.grey)),
-            const SizedBox(height: 24),
-            TextField(
-              onChanged: (val) => code = val,
-              decoration: InputDecoration(
-                hintText: "Paste referral code here",
-                filled: true,
-                fillColor: Colors.grey.withOpacity(0.1),
-                border: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: BorderSide.none),
-              ),
-            ),
-            const SizedBox(height: 24),
-            SizedBox(
-              width: double.infinity,
-              height: 50,
-              child: ElevatedButton(
-                style: ElevatedButton.styleFrom(backgroundColor: Colors.amber, foregroundColor: Colors.black, shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12))),
-                onPressed: () async {
-                  try {
-                    final myId = context.read<AuthProvider>().user?.id ?? "";
-                    await context.read<SocialProvider>().applyReferral(myId, code);
-                    Navigator.pop(ctx);
-                    _showSuccessDialog(context); // Niche wala function call karein
-                  } catch (e) {
-                    ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(e.toString())));
-                  }
-                },
-                child: const Text("CLAIM REWARD", style: TextStyle(fontWeight: FontWeight.bold)),
-              ),
-            ),
-          ],
-        ),
-      ),
-    ),
-  );
-}
-
-// Separate Success Dialog for clean code
-void _showSuccessDialog(BuildContext context) {
-  showDialog(
-    context: context,
-    builder: (ctx) => AlertDialog(
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
-      title: const Icon(Icons.check_circle, color: Colors.green, size: 50),
-      content: const Text("Yay! Rewards added successfully!", textAlign: TextAlign.center, style: TextStyle(fontSize: 16)),
-      actions: [
-        TextButton(onPressed: () => Navigator.pop(ctx), child: const Text("THANKS!")),
-      ],
-    ),
-  );
 }

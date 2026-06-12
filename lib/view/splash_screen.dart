@@ -16,23 +16,30 @@ class _SplashScreenState extends State<SplashScreen> {
   @override
   void initState() {
     super.initState();
-    _checkUpdateAndNavigate();
+    Future.delayed(const Duration(seconds: 2), () {
+      if (mounted) _checkUpdateAndNavigate();
+    });
   }
 
   Future<void> _checkUpdateAndNavigate() async {
+    try {
+      var updateData = await AppConfigService.instance.getUpdateStatus();
 
-    var updateData = await AppConfigService.instance.getUpdateStatus();
+      if (!mounted) return;
 
-    if (!mounted) return;
-
-    if (updateData['isRequired']) {
-      _showUpdateDialog(
-          context,
-          updateData['currentVersion'],
-          updateData['minVersion']
+      if (updateData['isRequired']) {
+        _showUpdateDialog(context, updateData['currentVersion'], updateData['minVersion']);
+      } else {
+        // use pushReplacement properly
+        Navigator.of(context).pushReplacement(
+            MaterialPageRoute(builder: (_) => const AuthWrapper())
+        );
+      }
+    } catch (e) {
+      // Agar API fail ho jaye to bhi app ko block na karein
+      Navigator.of(context).pushReplacement(
+          MaterialPageRoute(builder: (_) => const AuthWrapper())
       );
-    } else {
-      Navigator.pushReplacement(context, MaterialPageRoute(builder: (_) => const AuthWrapper()));
     }
   }
 
@@ -50,7 +57,7 @@ class _SplashScreenState extends State<SplashScreen> {
           ],
         ),
         content: Text(
-          "Aapka version: $current \nRequired version: $min \n\nPlease update to continue.",
+          "App version: $current \nRequired version: $min \n\nPlease update to continue.",
           style: const TextStyle(fontSize: 16),
         ),
         actions: [

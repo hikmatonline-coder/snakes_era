@@ -8,7 +8,7 @@ class SnakeGameProvider with ChangeNotifier {
   final double worldSize = 6000.0;
   final double chunkSize = 500.0;
   final double baseSnakeSpeed = 3.5;
-  final double spacing = 5.0; // Optimized spacing for smooth render
+  final double spacing = 5.0;
 
   // --- State Variables ---
   Offset playerPos = const Offset(3000, 3000);
@@ -17,7 +17,6 @@ class SnakeGameProvider with ChangeNotifier {
   List<Offset> playerBody = [];
   Set<NPCSnake> deadNPCs = {};
 
-  // Chunks mapping for extreme performance stability
   List<Food> foods = [];
   Map<String, List<Food>> chunkedFoods = {};
 
@@ -35,13 +34,20 @@ class SnakeGameProvider with ChangeNotifier {
   final int maxAdsPerSession = 3;
   bool isScoreDoubled = false;
 
+  // --- NEW: TICKETS MILESTONE SYSTEM VARIABLES ---
+  int milestonesClaimedDuringGame = 0;
+  int ticketsAwardedSoFar = 0; // Tracks all tickets awarded during this match session
+  Function(int tickets, String message)? onLiveTicketsRewarded; // Callback for UI popups
+
   Timer? gameTimer;
   DateTime _lastTick = DateTime.now();
   late List<Color> activeSkinColors;
   final List<String> botNames = ["Dragon", "Shadow", "Mamba", "Alpha", "Neon", "Viper", "Hunter", "Swift", "Venom", "Bolt"];
 
   // --- Core Lifecycle ---
-  void startGame(List<Color> skinColors) {
+  // CHANGE: Added optional live reward callback hook
+  void startGame(List<Color> skinColors, {Function(int, String)? onLiveTicketsRewarded}) {
+    this.onLiveTicketsRewarded = onLiveTicketsRewarded;
     activeSkinColors = skinColors;
     resetGame();
   }
@@ -50,7 +56,6 @@ class SnakeGameProvider with ChangeNotifier {
     gameTimer?.cancel();
     playerPos = const Offset(3000, 3000);
 
-    // Initialize standard fixed array length safely
     playerBody = List.generate(20, (i) => Offset(3000.0, 3000.0 + (i * spacing)));
     score = 0;
     adsWatchedThisSession = 0;
@@ -60,6 +65,10 @@ class SnakeGameProvider with ChangeNotifier {
     isGameOver = false;
     isBoosting = false;
     isInvincible = false;
+
+    // Reset ticket engine counters
+    milestonesClaimedDuringGame = 0;
+    ticketsAwardedSoFar = 0;
 
     foods = [];
     chunkedFoods = {};
@@ -240,7 +249,7 @@ class SnakeGameProvider with ChangeNotifier {
       }
     }
 
-    // 3. HUMAN PLAYER COLLISION SWEEP (STRICT DIRECT CONTACT)
+    // 3. HUMAN PLAYER COLLISION SWEEP
     int pX = (playerPos.dx / chunkSize).floor();
     int pY = (playerPos.dy / chunkSize).floor();
     List<Food> playerLocalFood = [];
@@ -325,7 +334,6 @@ class SnakeGameProvider with ChangeNotifier {
     if (foods.length < 1200) _spawnFood(200);
   }
 
-  // --- FIXED SMOOTH INTERPOLATION MOVEMENT ENGINE ---
   void _movePlayerLogic(double dt) {
     double agility = (1.0 - (playerBody.length / 3000)).clamp(0.40, 1.0);
     double diff = targetAngle - playerAngle;
@@ -336,7 +344,6 @@ class SnakeGameProvider with ChangeNotifier {
     double speedMultiplier = 1.0 - (playerBody.length / 4000).clamp(0.0, 0.35);
     double moveSpeed = (isBoosting ? 390.0 : 220.0) * speedMultiplier;
 
-    // 1. Move Head Point
     playerPos += Offset(cos(playerAngle) * moveSpeed * dt, sin(playerAngle) * moveSpeed * dt);
 
     if (playerBody.isEmpty) {
@@ -344,34 +351,28 @@ class SnakeGameProvider with ChangeNotifier {
       return;
     }
 
-    // 2. Head is always at index 0
     playerBody[0] = playerPos;
 
-    // 3. Smoothly drag each subsequent segment toward the previous one with explicit spacing constraint
     for (int i = 1; i < playerBody.length; i++) {
       Offset prev = playerBody[i - 1];
       Offset current = playerBody[i];
       double segmentDist = (prev - current).distance;
 
       if (segmentDist > spacing) {
-        // Calculate precise mathematical position vector to eliminate lag/glitch
         Offset direction = (prev - current) / segmentDist;
         playerBody[i] = prev - (direction * spacing);
       }
     }
 
-    // 4. Dynamic Growth Guard: Automatically adds segments matching the current score limit safely
     while (playerBody.length < currentLengthLimit) {
       playerBody.add(playerBody.last);
     }
 
-    // Dynamic Tail Cutter
     if (playerBody.length > currentLengthLimit) {
       playerBody = playerBody.sublist(0, currentLengthLimit);
     }
   }
 
-  // --- CLEANED MAGNET SYSTEM ---
   void _applyFoodMagnet(double dt) {
     if (isGameOver || isPaused) return;
 
@@ -420,12 +421,41 @@ class SnakeGameProvider with ChangeNotifier {
       score += 3;
     }
 
+    // --- NEW: IN-GAME MILESTONE ENGINE INTEGRATION ---
+    int expectedMilestones = score ~/ 1000;
+    if (expectedMilestones > milestonesClaimedDuringGame) {
+      int newMilestonesHit = expectedMilestones - milestonesClaimedDuringGame;
+      milestonesClaimedDuringGame = expectedMilestones;
+
+      int liveTickets = newMilestonesHit * 10;
+      ticketsAwardedSoFar += liveTickets;
+
+      // Trigger live callback ui toast if configured
+      onLiveTicketsRewarded?.call(liveTickets, "💥 AMAZING! +$liveTickets Live Tickets Added!");
+    }
+
     double efficiency = 1.0 / (1.0 + (playerBody.length / 600));
     double baseGrowth = f.isLoot ? 1.0 : 0.4;
     double growth = baseGrowth * 0.70 * efficiency;
 
     fractionalLength += growth;
     currentLengthLimit = fractionalLength.toInt();
+  }
+
+  // --- NEW: DYNAMIC END GAME CALCULATIONS ENGINE ---
+  int getRemainingTickets() {
+    int totalDeservedTickets = score ~/ 100; // 100 score = 1 ticket
+    int rem = totalDeservedTickets - ticketsAwardedSoFar;
+    return rem < 0 ? 0 : rem;
+  }
+
+  void finalizeAndClaimRemainingTickets(Function(int) addTicketsCallback) {
+    int remaining = getRemainingTickets();
+    if (remaining > 0) {
+      ticketsAwardedSoFar += remaining;
+      addTicketsCallback(remaining);
+      notifyListeners();
+    }
   }
 
   void _spawnSingleNPC() {

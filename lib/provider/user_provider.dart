@@ -1,11 +1,9 @@
 import 'dart:async';
-
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:snakes_era/core/constants.dart';
-
 import '../model/user_model.dart';
 
 class UserProvider with ChangeNotifier {
@@ -15,34 +13,57 @@ class UserProvider with ChangeNotifier {
   int _coins = AppConstants.coins;
   int _powerUps = AppConstants.powerUps;
 
+  // --- NAYI ECONOMIC SYSTEM VARIABLES ---
+  int _tickets = 0;
+  double _voucherWallet = 0.0;
+  bool _isPremium = false;
+  DateTime? _voucherExpiryDate;
+
+  // --- NEW: DYNAMIC VOUCHER INVENTORY TRACKER ---
+  // Firestore data map key hamesha string hota hy, is liye double keys ko safely track krne k liye map banaya hy
+  final Map<double, int> _voucherInventory = {
+    1.0: 0,
+    2.0: 0,
+    3.0: 0,
+    5.0: 0,
+  };
+
   int get coins => _coins;
   int get powerUps => _powerUps;
+  int get tickets => _tickets;
+  double get voucherWallet => _voucherWallet;
+  bool get isPremium => _isPremium;
+  DateTime? get voucherExpiryDate => _voucherExpiryDate;
+
+  // Method to easily get individual counts for UI Screen
+  int getVoucherCount(double value) {
+    return _voucherInventory[value] ?? 0;
+  }
 
   int _totalSecondsPlayed = 0;
   Set<String> _claimedRewards = {};
-
   int get totalSecondsPlayed => _totalSecondsPlayed;
 
   String _userName = "Player";
   int _highScore = 0;
   String? _uid;
+  String? _referralCode;
   bool _remoteLoaded = false;
 
   // --- Crypto Tournament States ---
   String _cryptoWalletAddress = "";
-  String _cryptoNetwork = "Solana"; // Default network choice
+  String _cryptoNetwork = "Solana";
 
   String get cryptoWalletAddress => _cryptoWalletAddress;
   String get cryptoNetwork => _cryptoNetwork;
-
   String get userName => _userName;
   int get highScore => _highScore;
   String? get uid => _uid;
+  String? get referralCode => _referralCode;
   bool get remoteLoaded => _remoteLoaded;
 
   String _currentSkinId = "c1";
   Set<String> _ownedSkinIds = {"c1"};
-
   String get currentSkinId => _currentSkinId;
   Set<String> get ownedSkinIds => _ownedSkinIds;
 
@@ -53,18 +74,13 @@ class UserProvider with ChangeNotifier {
     _listenToAuthChanges();
   }
 
-  /// Automatically monitors Firebase Auth state on app startup.
-  /// If an existing session is detected, it pulls their cloud save instantly.
   void _listenToAuthChanges() {
     FirebaseAuth.instance.authStateChanges().listen((User? user) {
       if (user != null) {
         _uid = user.uid;
         _userName = user.displayName ?? "SnakeMaster";
-
-        // Triggers the automated remote data pipeline for existing users
         loadRemoteUserData();
       } else {
-        // Clear runtime cache if no active login state exists
         resetLocalState();
       }
     });
@@ -98,7 +114,6 @@ class UserProvider with ChangeNotifier {
         _claimedRewards = claimed.split(',').toSet();
       }
     }
-
     notifyListeners();
   }
 
@@ -121,7 +136,6 @@ class UserProvider with ChangeNotifier {
       } else {
         await _createDefaultFirestoreProfile();
       }
-
       _remoteLoaded = true;
     } catch (e) {
       debugPrint('Failed to load user data from Firestore: $e');
@@ -131,15 +145,56 @@ class UserProvider with ChangeNotifier {
   }
 
   Future<void> _applyRemoteData(Map<String, dynamic> data) async {
-    // 1. Convert Map to UserModel (Yeh Model wali default values use karega)
     final user = UserModel.fromMap({...data, 'id': _uid});
 
-    // 2. State update using Model
     _coins = user.coins;
     _powerUps = user.powerUps;
     _highScore = user.highScore;
+    _referralCode = user.referralCode;
 
-    // 3. Independent fields (Jo Model mein nahi hain ya separate logic rakhte hain)
+    // --- VOUCHER & TICKETS INCOME FIELDS WITH EXPIRY CHECK ---
+    _tickets = data['tickets'] as int? ?? 0;
+    _isPremium = data['isPremium'] as bool? ?? false;
+
+    // Fetch and parse voucher inventory safely from remote data map
+    final remoteInventory = data['voucherInventory'] as Map<String, dynamic>?;
+    if (remoteInventory != null) {
+      remoteInventory.forEach((key, value) {
+        final doubleKey = double.tryParse(key);
+        if (doubleKey != null) {
+          _voucherInventory[doubleKey] = value as int? ?? 0;
+        }
+      });
+    } else {
+      // Inventory reset state configuration if empty in remote
+      _voucherInventory.updateAll((key, value) => 0);
+    }
+
+    if (data['voucherExpiry'] != null) {
+      _voucherExpiryDate = (data['voucherExpiry'] as Timestamp).toDate();
+
+      // Inactivity Filter: Agar user expiry date ke BAAD aya hy toh balance clear
+      if (DateTime.now().isAfter(_voucherExpiryDate!)) {
+        _voucherWallet = 0.0;
+        _voucherInventory.updateAll((key, value) => 0); // Inventory clear on expiry
+        debugPrint("🎉 Vouchers expired due to inactivity.");
+      } else {
+        _voucherWallet = (data['voucherWallet'] as num?)?.toDouble() ?? 0.0;
+      }
+    } else {
+      _voucherWallet = (data['voucherWallet'] as num?)?.toDouble() ?? 0.0;
+    }
+
+    // User active hua hy toh agle 30 days tak validity barhayein
+    _voucherExpiryDate = DateTime.now().add(const Duration(days: 30));
+
+    if (_referralCode == null || _referralCode!.isEmpty) {
+      final displayName = user.displayName.replaceAll(' ', '').toUpperCase();
+      final prefix = displayName.length >= 3 ? displayName.substring(0, 3) : "SNK";
+      _referralCode = "${prefix}${user.id.substring(0, 3)}".toUpperCase();
+      _syncBalancesToFirestore();
+    }
+
     _cryptoWalletAddress = data['cryptoWalletAddress'] as String? ?? "";
     _cryptoNetwork = data['cryptoNetwork'] as String? ?? "Solana";
 
@@ -149,22 +204,19 @@ class UserProvider with ChangeNotifier {
       _ownedSkinIds = remoteSkins.map((e) => e.toString()).toSet();
     }
 
-    // 4. Hydrate Secure Storage
     await _storage.write(key: 'user_high_score_cache', value: _highScore.toString());
 
-    // 5. Local to Cloud Migration (Legacy handling)
     final localCoins = await _storage.read(key: 'coins');
     final localPowers = await _storage.read(key: 'powers');
 
     if (data['coins'] == null && localCoins != null) _coins = int.tryParse(localCoins) ?? _coins;
     if (data['powerUps'] == null && localPowers != null) _powerUps = int.tryParse(localPowers) ?? _powerUps;
 
-    // 6. Cleanup
     await _syncBalancesToFirestore();
     await _syncSkins();
     await _clearLocalBalances();
 
-    notifyListeners(); // UI refresh ke liye
+    notifyListeners();
   }
 
   Future<void> _createDefaultFirestoreProfile() async {
@@ -173,6 +225,14 @@ class UserProvider with ChangeNotifier {
 
     _coins = AppConstants.coins;
     _powerUps = AppConstants.powerUps;
+    _tickets = 0;
+    _voucherWallet = 0.0;
+    _isPremium = false;
+    _voucherExpiryDate = DateTime.now().add(const Duration(days: 30));
+    _voucherInventory.updateAll((key, value) => 0);
+
+    _referralCode = user.displayName?.replaceAll(' ', '').toUpperCase().substring(0, 3) ?? "SNK";
+    _referralCode = "$_referralCode${user.uid.substring(0, 3)}".toUpperCase();
 
     await _userDoc!.set({
       'email': user.email,
@@ -181,17 +241,130 @@ class UserProvider with ChangeNotifier {
       'highScore': 0,
       'coins': _coins,
       'powerUps': _powerUps,
+      'tickets': _tickets,
+      'voucherWallet': _voucherWallet,
+      'voucherInventory': _voucherInventory.map((key, value) => MapEntry(key.toString(), value)),
+      'voucherExpiry': _voucherExpiryDate != null ? Timestamp.fromDate(_voucherExpiryDate!) : null,
+      'isPremium': _isPremium,
       'cryptoWalletAddress': _cryptoWalletAddress,
       'cryptoNetwork': _cryptoNetwork,
       'lives': AppConstants.maxLives,
       'lastRegenMs': null,
       'ownedSkinIds': _ownedSkinIds.toList(),
       'currentSkinId': _currentSkinId,
+      'referralCode': _referralCode,
       'lastUpdated': FieldValue.serverTimestamp(),
     }, SetOptions(merge: true));
   }
 
-  /// Updates and syncs the player's payment wallet destination
+  // ========================================================
+  //          THE NEW ECONOMIC TRADES & CORE LOOPS
+  // ========================================================
+
+  /// Coins se direct tickets buy karna
+  bool buyTicketWithCoins(int cost) {
+    if (_coins >= cost) {
+      _coins -= cost;
+      _tickets += 1;
+      _syncBalancesToFirestore();
+      return true;
+    }
+    return false;
+  }
+
+  void addFreeTickets(int amount) {
+    _tickets += amount;
+    _syncBalancesToFirestore();
+  }
+
+  void addVoucherReward(double amount) {
+    _voucherWallet += amount;
+    _syncBalancesToFirestore();
+  }
+
+  Future<void> activatePremiumWithIAP() async {
+    _isPremium = true;
+    _syncBalancesToFirestore();
+  }
+
+  bool buyPremiumWithVouchers(double premiumCostUSD) {
+    if (_voucherWallet >= premiumCostUSD && !_isPremium) {
+      _voucherWallet -= premiumCostUSD;
+      _isPremium = true;
+      _syncBalancesToFirestore();
+      return true;
+    }
+    return false;
+  }
+
+  bool useTicketForDraw() {
+    if (_tickets >= 1) {
+      _tickets -= 1;
+      _syncBalancesToFirestore();
+      return true;
+    }
+    return false;
+  }
+
+  /// Tickets de kar Coins buy karna
+  bool tradeTicketsForCoins(int ticketCost, int coinReward) {
+    if (_tickets >= ticketCost) {
+      _tickets -= ticketCost;
+      _coins += coinReward;
+      _syncBalancesToFirestore();
+      return true;
+    }
+    return false;
+  }
+
+  /// Tickets de kar PowerUps lena
+  bool tradeTicketsForPowerUps(int ticketCost, int powerReward) {
+    if (_tickets >= ticketCost) {
+      _tickets -= ticketCost;
+      _powerUps += powerReward;
+      _syncBalancesToFirestore();
+      return true;
+    }
+    return false;
+  }
+
+  /// FIXED RATE CONFIGURATION: Dynamic voucher printing loop (\$1, \$2, \$3, \$5)
+  bool buyVoucherWithTickets(int ticketCost, double voucherValue) {
+    if (_tickets >= ticketCost) {
+      _tickets -= ticketCost;
+
+      // Update inventory map values safely
+      _voucherInventory[voucherValue] = (_voucherInventory[voucherValue] ?? 0) + 1;
+
+      // Update overall financial wallet valuation summary
+      _voucherWallet += voucherValue;
+
+      _syncBalancesToFirestore();
+      return true;
+    }
+    return false;
+  }
+
+  /// Liquidity Reverse Return Mechanism with structural 20% validation penalty check
+  bool sellVoucherForTickets(double voucherValue, int ticketReward) {
+    if (getVoucherCount(voucherValue) > 0) {
+      // Decrease specific stock inventory count by exactly 1 item unit
+      _voucherInventory[voucherValue] = _voucherInventory[voucherValue]! - 1;
+
+      // Deduction from dynamic liquidity summary data
+      _voucherWallet -= voucherValue;
+
+      // Refund payload execution
+      _tickets += ticketReward;
+
+      _syncBalancesToFirestore();
+      return true;
+    }
+    return false;
+  }
+
+  // ========================================================
+
   Future<void> updateCryptoWallet(String address, String network) async {
     _cryptoWalletAddress = address.trim();
     _cryptoNetwork = network.trim();
@@ -314,7 +487,6 @@ class UserProvider with ChangeNotifier {
         'lastUpdated': FieldValue.serverTimestamp(),
       }, SetOptions(merge: true));
     }
-
     notifyListeners();
   }
 
@@ -352,13 +524,10 @@ class UserProvider with ChangeNotifier {
     }
   }
 
-  /// Resource-Optimized Score Submission with Time-Window Caching
   Future<void> updateHighScore(int newScore) async {
     final user = FirebaseAuth.instance.currentUser;
     if (user == null) return;
 
-    // SetOptions(merge: true) ka matlab hai ke purana score delete nahi hoga,
-    // bas "score" field update ho jayegi.
     await _db.collection('scores').doc(user.uid).set({
       'score': newScore,
       'userId': user.uid,
@@ -368,7 +537,6 @@ class UserProvider with ChangeNotifier {
       'month': DateTime.now().month,
       'timestamp': FieldValue.serverTimestamp(),
     });
-
     notifyListeners();
   }
 
@@ -381,28 +549,66 @@ class UserProvider with ChangeNotifier {
   }
 
   Future<void> _syncBalancesToFirestore() async {
-    notifyListeners();
-
     final docRef = _userDoc;
     if (docRef == null) return;
 
-    try {
-      // UserModel ka instance banayen taaki sirf data wahi ho jo hum define kar chuke hain
-      final Map<String, dynamic> dataToSync = {
-        'coins': _coins,
-        'powerUps': _powerUps,
-        'highScore': _highScore,
-        'lastUpdated': FieldValue.serverTimestamp(),
-      };
+    final Map<String, dynamic> dataToSync = {
+      'coins': _coins,
+      'powerUps': _powerUps,
+      'highScore': _highScore,
+      'referralCode': _referralCode,
+      'tickets': _tickets,
+      'voucherWallet': _voucherWallet,
+      // Map keys converted to string so Firestore can process safely
+      'voucherInventory': _voucherInventory.map((key, value) => MapEntry(key.toString(), value)),
+      'voucherExpiry': _voucherExpiryDate != null ? Timestamp.fromDate(_voucherExpiryDate!) : null,
+      'isPremium': _isPremium,
+      'lastUpdated': FieldValue.serverTimestamp(),
+    };
 
+    try {
       await docRef.set(dataToSync, SetOptions(merge: true));
-      debugPrint('Data synced successfully');
+      notifyListeners();
     } catch (e) {
-      debugPrint('Failed to sync balances to Firestore: $e');
+      debugPrint('Sync Error: $e');
     }
   }
 
-  void resetLocalState() {
+  // ========================================================
+  //       LIVE SCORE TO TICKETS REWARD SYSTEM
+  // ========================================================
+
+  /// 1. Game ke doran live milestone achieve hone par call karein
+  void addLiveMilestoneTickets(int amount) {
+    _tickets += amount;
+    _syncBalancesToFirestore(); // Live database me save karein
+    notifyListeners();
+  }
+
+  /// 2. Game Over screen pr baki bache hue points ke tickets dene ke liye
+  /// [finalScore] = Total Score, [milestonesClaimed] = Game k andar kitni baar 1000 hit hua
+  void finalizeGameScoreAndTickets(int finalScore, int milestonesClaimed) {
+    // 1000 score = 10 tickets, iska matlab 100 score = 1 ticket
+    int totalDeservedTickets = finalScore ~/ 100;
+    int alreadyGivenTickets = milestonesClaimed * 10;
+
+    // Jo tickets game k andar live nahi mile, wo ab de dein (e.g. upar wale 500 score k 5 tickets)
+    int remainingTickets = totalDeservedTickets - alreadyGivenTickets;
+
+    if (remainingTickets > 0) {
+      _tickets += remainingTickets;
+    }
+
+    // High score check aur update logic bhi sath hi handle ho jaye
+    if (finalScore > _highScore) {
+      _highScore = finalScore;
+      updateHighScore(finalScore);
+    }
+
+    _syncBalancesToFirestore();
+  }
+
+  void resetLocalState() async {
     _uid = null;
     _remoteLoaded = false;
     _coins = AppConstants.coins;
@@ -411,6 +617,19 @@ class UserProvider with ChangeNotifier {
     _userName = "Player";
     _cryptoWalletAddress = "";
     _cryptoNetwork = "Solana";
+
+    _tickets = 0;
+    _voucherWallet = 0.0;
+    _isPremium = false;
+    _voucherExpiryDate = null;
+    _voucherInventory.updateAll((key, value) => 0); // Clear inventory structure safely
+
+    _currentSkinId = "c1";
+    _ownedSkinIds = {"c1"};
+
+    await _storage.delete(key: 'current_skin_id');
+    await _storage.delete(key: 'owned_skin_ids');
+
     notifyListeners();
   }
 }

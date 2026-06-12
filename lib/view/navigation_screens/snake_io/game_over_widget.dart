@@ -1,14 +1,13 @@
 import 'dart:math';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
-
 import '../../../provider/snake_game_provider.dart';
 import '../../../provider/user_provider.dart';
-import '../../../provider/ads_provider.dart'; // Make sure this path points to your AdProvider
+import '../../../provider/ads_provider.dart';
 
 class GameOverOverlay extends StatelessWidget {
   final int score;
-  final VoidCallback onLoseLife; // Exits to home screen
+  final VoidCallback onLoseLife;
 
   GameOverOverlay({
     super.key,
@@ -28,16 +27,19 @@ class GameOverOverlay extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final gameProvider = Provider.of<SnakeGameProvider>(context);
-    final user = Provider.of<UserProvider>(context, listen: false); // CHANGE: Set listen to false for stable callback execution
+    final user = Provider.of<UserProvider>(context, listen: false);
     final adProv = Provider.of<AdProvider>(context);
 
     // -------------------------------------------------------------------------
-    // CHANGE: AUTOMATIC BACKUP COMMIT
-    // Fires immediately when the game-over screen mounts to ensure the match is
-    // registered to weekly/monthly leaderboards, even if the player exits early.
+    // AUTOMATIC BACKUP COMMIT + STANDARD FRACTIONAL TICKETS CLAIM
     // -------------------------------------------------------------------------
     WidgetsBinding.instance.addPostFrameCallback((_) {
       user.updateHighScore(gameProvider.score);
+
+      // Mount hote hi bache hue fractional tickets (e.g. 500 score k 5 tickets) secure karein
+      gameProvider.finalizeAndClaimRemainingTickets((remainingTickets) {
+        user.addFreeTickets(remainingTickets);
+      });
     });
 
     final bool canRevive = gameProvider.adsWatchedThisSession < gameProvider.maxAdsPerSession;
@@ -87,10 +89,14 @@ class GameOverOverlay extends StatelessWidget {
                         ? () async {
                       gameProvider.isPaused = true;
                       await adProv.showRewardedAd(
-                        onUserEarnedReward: (ad, rewardItem) async { // CHANGE: Added async wrapper
+                        onUserEarnedReward: (ad, rewardItem) async {
                           gameProvider.doubleScore();
-                          // CHANGE: Instantly push the new doubled score to Firestore indexes
                           await user.updateHighScore(gameProvider.score);
+
+                          // NEW: Score double hone par mazeed deserved tickets claim karein safely!
+                          gameProvider.finalizeAndClaimRemainingTickets((doubleRemainingTickets) {
+                            user.addFreeTickets(doubleRemainingTickets);
+                          });
                         },
                       );
                       gameProvider.isPaused = false;
@@ -128,7 +134,29 @@ class GameOverOverlay extends StatelessWidget {
               Text("BEST: ${isNewBest ? gameProvider.score : user.highScore}",
                   style: const TextStyle(color: Colors.white54, fontSize: 18)),
 
-              const SizedBox(height: 30),
+              // --- NEW: TOTAL MATCH EARNINGS DISPLAY PANEL ---
+              const SizedBox(height: 10),
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                decoration: BoxDecoration(
+                    color: Colors.amber.withOpacity(0.1),
+                    borderRadius: BorderRadius.circular(12),
+                    border: Border.all(color: Colors.amber.withOpacity(0.3))
+                ),
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    const Icon(Icons.confirmation_number, color: Colors.amber, size: 20),
+                    const SizedBox(width: 8),
+                    Text(
+                      "TOTAL EARNED: ${gameProvider.ticketsAwardedSoFar} TICKETS",
+                      style: const TextStyle(color: Colors.amber, fontWeight: FontWeight.bold, fontSize: 14),
+                    ),
+                  ],
+                ),
+              ),
+
+              const SizedBox(height: 20),
 
               // --- REVIVE BUTTON WITH AD VALIDATION ---
               if (canRevive)
@@ -138,22 +166,18 @@ class GameOverOverlay extends StatelessWidget {
                       width: 260,
                       height: 52,
                       child: ElevatedButton.icon(
-                        // Logic: Agar ad ready hai, cooldown 0 hai, AUR revives bache hain
                         onPressed: (canClickActions && canRevive)
                             ? () async {
                           gameProvider.isPaused = true;
                           await adProv.showRewardedAd(
                             onUserEarnedReward: (ad, rewardItem) {
-                              // 1. Ads counter increment
                               gameProvider.adsWatchedThisSession++;
-                              // 2. Game revive
                               gameProvider.revivePlayer();
                             },
                           );
-                          // Reset game state after ad interaction
                           gameProvider.isPaused = false;
                         }
-                            : null, // Yeh null button ko grey aur non-clickable bana dega
+                            : null,
                         icon: isAdLoading
                             ? const SizedBox(
                             width: 18,
@@ -170,7 +194,7 @@ class GameOverOverlay extends StatelessWidget {
                         style: ElevatedButton.styleFrom(
                             backgroundColor: Colors.green,
                             foregroundColor: Colors.white,
-                            disabledBackgroundColor: Colors.white12, // Disabled state color
+                            disabledBackgroundColor: Colors.white12,
                             disabledForegroundColor: Colors.white30,
                             shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(15))),
                       ),

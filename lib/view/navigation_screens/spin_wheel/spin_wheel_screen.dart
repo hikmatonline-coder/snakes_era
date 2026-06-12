@@ -19,17 +19,24 @@ class SpinWheelScreen extends StatefulWidget {
 class _SpinWheelScreenState extends State<SpinWheelScreen> with SingleTickerProviderStateMixin {
 
   late AnimationController _controller;
+
   final List<String> rewards = [
-    "50 COINS",   // 0
-    "1 LIFE",     // 1
-    "1 POWER",    // 2
-    "100 COINS",  // 3
-    "2 LIVES",    // 4
-    "0 LIVES",    // 5
-    "500 COINS",  // 6 (Jackpot)
-    "5 LIVES",    // 7
-    "2 POWER",    // 8
-    "0 COINS",    // 9
+    "50 COINS",    // 0
+    "1 POWER",     // 1
+    "100 COINS",   // 2
+    "2 POWER",     // 3
+    "20 COINS",    // 4
+    "0 POWER",     // 5 (Bad Luck)
+    "150 COINS",   // 6
+    "3 POWER",     // 7
+    "50 COINS",    // 8
+    "0 COINS",     // 9 (Bad Luck)
+    "200 COINS",   // 10
+    "1 POWER",     // 11
+    "75 COINS",    // 12
+    "5 POWER",     // 13 (Mega Power)
+    "25 COINS",    // 14
+    "500 COINS",   // 15 (Jackpot)
   ];
 
   @override

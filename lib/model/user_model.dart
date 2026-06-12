@@ -1,3 +1,5 @@
+import 'package:cloud_firestore/cloud_firestore.dart';
+
 class UserModel {
   final String id;
   final String email;
@@ -8,7 +10,11 @@ class UserModel {
   final int powerUps;
   final int lives;
   final String? referredBy;
-  final String? teamId;
+  final String? referralCode;
+  final int tickets;
+  final double voucherWallet;
+  final bool isPremium;
+  final DateTime? voucherExpiry;
 
   UserModel({
     required this.id,
@@ -20,7 +26,11 @@ class UserModel {
     this.powerUps = 10,
     this.lives = 5,
     this.referredBy,
-    this.teamId,
+    this.referralCode,
+    this.tickets = 0,
+    this.voucherWallet = 0.0,
+    this.isPremium = false,
+    this.voucherExpiry,
   });
 
   Map<String, dynamic> toMap() {
@@ -34,7 +44,11 @@ class UserModel {
       'powerUps': powerUps,
       'lives': lives,
       'referredBy': referredBy,
-      'teamId': teamId,
+      'referralCode': referralCode,
+      'tickets': tickets,
+      'voucherWallet': voucherWallet,
+      'isPremium': isPremium,
+      'voucherExpiry': voucherExpiry != null ? Timestamp.fromDate(voucherExpiry!) : null,
     };
   }
 
@@ -49,7 +63,13 @@ class UserModel {
       powerUps: (map['powerUps'] as num?)?.toInt() ?? 10,
       lives: (map['lives'] as num?)?.toInt() ?? 5,
       referredBy: map['referredBy'],
-      teamId: map['teamId'],
+      referralCode: map['referralCode'],
+      tickets: (map['tickets'] as num?)?.toInt() ?? 0,
+      voucherWallet: (map['voucherWallet'] as num?)?.toDouble() ?? 0.0,
+      isPremium: map['isPremium'] ?? false,
+      voucherExpiry: map['voucherExpiry'] != null
+          ? (map['voucherExpiry'] as Timestamp).toDate()
+          : null,
     );
   }
 }

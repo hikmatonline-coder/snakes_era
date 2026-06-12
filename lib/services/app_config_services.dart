@@ -3,7 +3,6 @@ import 'package:firebase_remote_config/firebase_remote_config.dart';
 import 'package:url_launcher/url_launcher.dart';
 
 class AppConfigService {
-  // Singleton pattern (taake baar baar class na banani pare)
   static final AppConfigService instance = AppConfigService._internal();
   AppConfigService._internal();
 
