@@ -58,25 +58,6 @@ class _NavigationScreenState extends State<NavigationScreen> {
     double dynamicWidth = lifeProv.lives >= AppConstants.maxLives ? 80.0 : 120.0;
 
     return Scaffold(
-      // backgroundColor: AppColors.background,
-      appBar: AppBar(
-        backgroundColor: Colors.transparent,
-        elevation: 0,
-        // 1. LIFE ICONS (START)
-        // We increase leadingWidth to ensure the life icons don't get squished
-        leadingWidth: dynamicWidth,
-        leading: const Padding(
-          padding: EdgeInsets.only(left: 16.0),
-          child: Center(child: LifeTimerWidget()),
-        ),
-        // 2. COINS & POWERUPS (END)
-        actions: [
-          _buildStatChip(context, Icons.bolt, "${userProv.powerUps}", Colors.purpleAccent),
-          const SizedBox(width: 12),
-          _buildStatChip(context, Icons.monetization_on, "${userProv.coins}", Colors.amber),
-          const SizedBox(width: 16),
-        ],
-      ),
       body: IndexedStack(
         index: _currentIndex,
         children: _pages,

@@ -35,6 +35,13 @@ class UserProvider with ChangeNotifier {
   bool get isPremium => _isPremium;
   DateTime? get voucherExpiryDate => _voucherExpiryDate;
 
+  int _dailyHighScore = 0;
+  String _dailyHighScoreDate = "";
+  int _weeklyHighScore = 0;
+  String _weeklyHighScoreWeek = "";
+  int _monthlyHighScore = 0;
+  String _monthlyHighScoreMonth = "";
+
   // Method to easily get individual counts for UI Screen
   int getVoucherCount(double value) {
     return _voucherInventory[value] ?? 0;
@@ -155,6 +162,12 @@ class UserProvider with ChangeNotifier {
     // --- VOUCHER & TICKETS INCOME FIELDS WITH EXPIRY CHECK ---
     _tickets = data['tickets'] as int? ?? 0;
     _isPremium = data['isPremium'] as bool? ?? false;
+    _dailyHighScore = data['dailyHighScore'] as int? ?? 0;
+    _dailyHighScoreDate = data['dailyHighScoreDate'] as String? ?? "";
+    _weeklyHighScore = data['weeklyHighScore'] as int? ?? 0;
+    _weeklyHighScoreWeek = data['weeklyHighScoreWeek'] as String? ?? "";
+    _monthlyHighScore = data['monthlyHighScore'] as int? ?? 0;
+    _monthlyHighScoreMonth = data['monthlyHighScoreMonth'] as String? ?? "";
 
     // Fetch and parse voucher inventory safely from remote data map
     final remoteInventory = data['voucherInventory'] as Map<String, dynamic>?;
@@ -525,19 +538,51 @@ class UserProvider with ChangeNotifier {
   }
 
   Future<void> updateHighScore(int newScore) async {
-    final user = FirebaseAuth.instance.currentUser;
-    if (user == null) return;
+    final docRef = _userDoc;
+    if (docRef == null) return;
+    final now = DateTime.now();
+    // Unique Date format keys (e.g., "2026-06-12", "2026-W24", "2026-06")
+    final todayStr = "${now.year}-${now.month.toString().padLeft(2, '0')}-${now.day.toString().padLeft(2, '0')}";
+    final weekStr = "${now.year}-W${getIsoWeekNumber(now).toString().padLeft(2, '0')}";
+    final monthStr = "${now.year}-${now.month.toString().padLeft(2, '0')}";
 
-    await _db.collection('scores').doc(user.uid).set({
-      'score': newScore,
-      'userId': user.uid,
-      'username': user.displayName ?? "Player",
-      'year': DateTime.now().year,
-      'weekOfYear': getIsoWeekNumber(DateTime.now()),
-      'month': DateTime.now().month,
-      'timestamp': FieldValue.serverTimestamp(),
-    });
-    notifyListeners();
+    Map<String, dynamic> updates = {};
+
+    // 📅 1. Daily Limit Check
+    if (_dailyHighScoreDate != todayStr || newScore > _dailyHighScore) {
+      _dailyHighScore = newScore;
+      _dailyHighScoreDate = todayStr;
+      updates['dailyHighScore'] = _dailyHighScore;
+      updates['dailyHighScoreDate'] = _dailyHighScoreDate;
+    }
+
+    // 🗓️ 2. Weekly Limit Check
+    if (_weeklyHighScoreWeek != weekStr || newScore > _weeklyHighScore) {
+      _weeklyHighScore = newScore;
+      _weeklyHighScoreWeek = weekStr;
+      updates['weeklyHighScore'] = _weeklyHighScore;
+      updates['weeklyHighScoreWeek'] = _weeklyHighScoreWeek;
+    }
+
+    // 🌙 3. Monthly Limit Check
+    if (_monthlyHighScoreMonth != monthStr || newScore > _monthlyHighScore) {
+      _monthlyHighScore = newScore;
+      _monthlyHighScoreMonth = monthStr;
+      updates['monthlyHighScore'] = _monthlyHighScore;
+      updates['monthlyHighScoreMonth'] = _monthlyHighScoreMonth;
+    }
+
+    // 🏆 4. All-Time Record Check
+    if (newScore > _highScore) {
+      _highScore = newScore;
+      updates['highScore'] = _highScore;
+    }
+
+    // 🔥 Agar koi record toota hy toh hi database me write hoga, warna 0 cost!
+    if (updates.isNotEmpty) {
+      await docRef.set(updates, SetOptions(merge: true));
+      notifyListeners();
+    }
   }
 
   int getIsoWeekNumber(DateTime date) {
@@ -587,25 +632,22 @@ class UserProvider with ChangeNotifier {
 
   /// 2. Game Over screen pr baki bache hue points ke tickets dene ke liye
   /// [finalScore] = Total Score, [milestonesClaimed] = Game k andar kitni baar 1000 hit hua
-  void finalizeGameScoreAndTickets(int finalScore, int milestonesClaimed) {
-    // 1000 score = 10 tickets, iska matlab 100 score = 1 ticket
+  void finalizeGameScoreAndTickets(int finalScore, int milestonesClaimed) async {
     int totalDeservedTickets = finalScore ~/ 100;
     int alreadyGivenTickets = milestonesClaimed * 10;
-
-    // Jo tickets game k andar live nahi mile, wo ab de dein (e.g. upar wale 500 score k 5 tickets)
     int remainingTickets = totalDeservedTickets - alreadyGivenTickets;
 
     if (remainingTickets > 0) {
       _tickets += remainingTickets;
     }
 
-    // High score check aur update logic bhi sath hi handle ho jaye
-    if (finalScore > _highScore) {
-      _highScore = finalScore;
-      updateHighScore(finalScore);
+    // Direct hamare optimized highscore controller ko bheinjen
+    if (finalScore > 0) {
+      await updateHighScore(finalScore);
     }
 
-    _syncBalancesToFirestore();
+    // Coins aur tickets update karne k liye (Yeh game over pr lazmi hy)
+    await _syncBalancesToFirestore();
   }
 
   void resetLocalState() async {

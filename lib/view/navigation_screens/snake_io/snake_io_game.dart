@@ -21,6 +21,7 @@ class SnakeIOGame extends StatefulWidget {
 class _SnakeIOGameState extends State<SnakeIOGame> {
 
   Timer? _pauseAdTimer; // To handle the 3-second ad delay
+  Offset? joystickPivot;
 
   void _togglePauseWithAd(SnakeGameProvider game) {
     final adProv = Provider.of<AdProvider>(context, listen: false);
@@ -144,13 +145,32 @@ class _SnakeIOGameState extends State<SnakeIOGame> {
       backgroundColor: const Color(0xFF0F0F0F),
       body: Stack(
         children: [
-          // 1. GAMEPLAY LAYER
+          // 1. GAMEPLAY LAYER (UPDATED FOR FLOATING TOUCH)
           RepaintBoundary(
             child: GestureDetector(
-              onPanUpdate: (d) {
-                final center = MediaQuery.of(context).size.center(Offset.zero);
-                game.setTargetAngle((d.localPosition - center).direction);
+              onPanStart: (details) {
+                // 📍 Jis jagah pehli dafa touch kiya, wo joystick ka center ban gaya
+                joystickPivot = details.localPosition;
               },
+              onPanUpdate: (details) {
+                if (joystickPivot != null) {
+                  // Current touch aur start touch ka darmiyan ka gap nikalen
+                  Offset delta = details.localPosition - joystickPivot!;
+
+                  // Choti thartharahat se bachne ke liye 5 pixels ka gap lazmi ho
+                  if (delta.distance > 5) {
+                    // 🔄 Saanp ko direct relative angle bheinjo
+                    game.setTargetAngle(delta.direction);
+
+                    // 🕹️ Joystick Lock: Agar haath boht door ghaseetain toh pivot sath move kare
+                    if (delta.distance > 45) {
+                      joystickPivot = details.localPosition - (delta / delta.distance) * 45;
+                    }
+                  }
+                }
+              },
+              onPanEnd: (_) => joystickPivot = null,
+              onPanCancel: () => joystickPivot = null,
               child: CustomPaint(
                 painter: SnakeGamePainter(
                   game.playerPos, game.playerAngle, game.playerBody,

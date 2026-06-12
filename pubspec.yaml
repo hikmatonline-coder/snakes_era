@@ -44,7 +44,7 @@ dependencies:
   firebase_auth: ^5.3.4
   google_sign_in: ^6.2.2
   cloud_firestore: ^5.5.0
-  google_mobile_ads: ^8.0.0
+  google_mobile_ads: ^9.0.0
   google_fonts: ^6.1.0
   rename_app: ^1.6.5
   in_app_review: ^2.0.12

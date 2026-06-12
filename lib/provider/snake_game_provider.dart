@@ -220,7 +220,7 @@ class SnakeGameProvider with ChangeNotifier {
       }
     }
 
-    // 2. BOT FOOD INTERACTION SYSTEM
+    // 2. BOT FOOD INTERACTION SYSTEM (UPDATED WITH RANK-BASED GROWTH MULTIPLIER)
     for (var npc in npcs) {
       int nX = (npc.pos.dx / chunkSize).floor();
       int nY = (npc.pos.dy / chunkSize).floor();
@@ -245,7 +245,18 @@ class SnakeGameProvider with ChangeNotifier {
 
       if (foodToEat != null && foods.contains(foodToEat)) {
         _removeFood(foodToEat);
-        npc.grow(max(1, ((foodToEat.isLoot ? 2 : 1) * 0.70).round()));
+
+        // 🚀 SMART ACCELERATED GROWTH SYSTEM
+        int baseGrowth = foodToEat.isLoot ? 3 : 1;
+
+        // Higher rank bots consume food with greater efficiency to dominate leaderboard
+        if (npc.rank == NPCType.legend) {
+          baseGrowth = foodToEat.isLoot ? 6 : 3;
+        } else if (npc.rank == NPCType.pro) {
+          baseGrowth = foodToEat.isLoot ? 4 : 2;
+        }
+
+        npc.grow(baseGrowth);
       }
     }
 
@@ -463,23 +474,100 @@ class SnakeGameProvider with ChangeNotifier {
     Offset spawnPos;
     do {
       spawnPos = Offset(rng.nextDouble() * (worldSize - 200) + 100, rng.nextDouble() * (worldSize - 200) + 100);
-    } while ((spawnPos - playerPos).distance < 700);
+    } while ((spawnPos - playerPos).distance < 700); // Player ke bilkul sar par spawn na ho
 
     String name = botNames[rng.nextInt(botNames.length)];
     String uniqueName = "$name#${rng.nextInt(99)}";
 
+    int initialLength;
+    NPCType rank;
+    NPCSize sizeCategory;
+
+    double chance = rng.nextDouble();
+
+    if (chance < 0.08) {
+      // 8% chance ke Legend bot respawn ho
+      initialLength = rng.nextInt(50) + 120;
+      rank = NPCType.legend;
+      sizeCategory = NPCSize.xlarge;
+      uniqueName = "👑 $name [LEGEND]";
+    } else if (chance < 0.28) {
+      // 20% chance ke Pro bot respawn ho
+      initialLength = rng.nextInt(40) + 70;
+      rank = NPCType.pro;
+      sizeCategory = NPCSize.large;
+      uniqueName = "🔥 $name [PRO]";
+    } else if (chance < 0.65) {
+      // 37% chance ke Medium Beginner bot ho
+      initialLength = rng.nextInt(20) + 35;
+      rank = NPCType.beginner;
+      sizeCategory = NPCSize.medium;
+    } else {
+      // Remaining 35% Normal small bot
+      initialLength = rng.nextInt(15) + 15;
+      rank = NPCType.noob;
+      sizeCategory = NPCSize.small;
+    }
+
     npcs.add(NPCSnake(
         spawnPos,
-        rng.nextInt(25) + 20,
+        initialLength,
         [Colors.primaries[rng.nextInt(Colors.primaries.length)], Colors.white],
-        NPCType.beginner,
+        rank,
         uniqueName,
-        NPCSize.medium
+        sizeCategory
     ));
   }
 
   void _spawnNPCs(int count) {
-    for (int i = 0; i < count; i++) _spawnSingleNPC();
+    var rng = Random();
+    for (int i = 0; i < count; i++) {
+      Offset spawnPos = Offset(
+          rng.nextDouble() * (worldSize - 400) + 200,
+          rng.nextDouble() * (worldSize - 400) + 200
+      );
+
+      String name = botNames[rng.nextInt(botNames.length)];
+      String uniqueName = "$name#${rng.nextInt(99)}";
+
+      int initialLength;
+      NPCType rank;
+      NPCSize sizeCategory;
+
+      // 👑 DYNAMIC SIZE RATIO DISTRIBUTION
+      if (i < 2) {
+        // Top 2 Global Boss Snakes (Legendary Status)
+        initialLength = rng.nextInt(80) + 180; // Length: 180 to 260
+        rank = NPCType.legend;
+        sizeCategory = NPCSize.xlarge;
+        uniqueName = "👑 $name [LEGEND]";
+      } else if (i >= 2 && i < 7) {
+        // 5 Aggressive Pro Competitors
+        initialLength = rng.nextInt(50) + 80;   // Length: 80 to 130
+        rank = NPCType.pro;
+        sizeCategory = NPCSize.large;
+        uniqueName = "🔥 $name [PRO]";
+      } else if (i >= 7 && i < 20) {
+        // Mid-tier standard bots
+        initialLength = rng.nextInt(25) + 35;   // Length: 35 to 60
+        rank = NPCType.beginner;
+        sizeCategory = NPCSize.medium;
+      } else {
+        // Small/Newbie bots
+        initialLength = rng.nextInt(15) + 15;   // Length: 15 to 30
+        rank = NPCType.noob;
+        sizeCategory = NPCSize.small;
+      }
+
+      npcs.add(NPCSnake(
+          spawnPos,
+          initialLength,
+          [Colors.primaries[rng.nextInt(Colors.primaries.length)], Colors.white],
+          rank,
+          uniqueName,
+          sizeCategory
+      ));
+    }
   }
 
   void togglePause() {

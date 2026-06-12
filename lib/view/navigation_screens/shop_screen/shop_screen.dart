@@ -62,192 +62,194 @@ class _ShopScreenState extends State<ShopScreen> {
     final life = Provider.of<LifeProvider>(context);
     final adProv = Provider.of<AdProvider>(context);
 
-    return Scaffold(
-      backgroundColor: colorScheme.surface,
-      body: ListView(
-        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 20),
-        children: [
-          // ========================================================
-          //   PREMIUM WALLET DASHBOARD (With Inventory Breakdown)
-          // ========================================================
-          _buildPremiumWalletDashboard(context, user),
-          const SizedBox(height: 24),
+    return SafeArea(
+      child: Scaffold(
+        backgroundColor: colorScheme.surface,
+        body: ListView(
+          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 20),
+          children: [
+            // ========================================================
+            //   PREMIUM WALLET DASHBOARD (With Inventory Breakdown)
+            // ========================================================
+            _buildPremiumWalletDashboard(context, user),
+            const SizedBox(height: 24),
 
-          // --- Section 1: Daily Missions ---
-          _section(context, "DAILY IN-GAME MISSIONS", Icons.star_purple500_outlined),
-          const SizedBox(height: 12),
-          _missionCard(context, user, adProv, "Quick Pulse", 3, 20, "m1"),
-          _missionCard(context, user, adProv, "Game Session", 10, 50, "m2"),
-          _missionCard(context, user, adProv, "Elite Endurance", 20, 80, "m3"),
+            // --- Section 1: Daily Missions ---
+            _section(context, "DAILY IN-GAME MISSIONS", Icons.star_purple500_outlined),
+            const SizedBox(height: 12),
+            _missionCard(context, user, adProv, "Quick Pulse", 3, 20, "m1"),
+            _missionCard(context, user, adProv, "Game Session", 10, 50, "m2"),
+            _missionCard(context, user, adProv, "Elite Endurance", 20, 80, "m3"),
 
-          const SizedBox(height: 28),
+            const SizedBox(height: 28),
 
-          // --- SECTION 2: DYNAMIC TICKET TO VOUCHER MARKET ---
-          _section(context, "USD VOUCHER MARKET (10K RATE)", Icons.card_giftcard_rounded),
-          const SizedBox(height: 12),
+            // --- SECTION 2: DYNAMIC TICKET TO VOUCHER MARKET ---
+            _section(context, "USD VOUCHER MARKET (10K RATE)", Icons.card_giftcard_rounded),
+            const SizedBox(height: 12),
 
-          // Loop through all defined tiers ($1, $2, $3, $5) automatically!
-          ...GameEconomy.voucherTiers.map((tier) {
-            int ticketCost = GameEconomy.getTicketCostForVoucher(tier);
-            return _modernTradeCard(
+            // Loop through all defined tiers ($1, $2, $3, $5) automatically!
+            ...GameEconomy.voucherTiers.map((tier) {
+              int ticketCost = GameEconomy.getTicketCostForVoucher(tier);
+              return _modernTradeCard(
+                context,
+                title: "Buy \$${tier.toStringAsFixed(2)} USD Voucher",
+                subtitle: "Convert tickets to real money voucher",
+                costText: "$ticketCost Tickets",
+                rewardText: "+\$${tier.toStringAsFixed(2)} Voucher",
+                icon: Icons.card_giftcard,
+                accentColor: Colors.greenAccent,
+                onTap: () => _handleExchange(
+                  context,
+                  user.tickets >= ticketCost,
+                  "MINT \$${tier.toStringAsFixed(2)} VOUCHER",
+                  "Convert $ticketCost Tickets into a \$${tier.toStringAsFixed(2)} cashout voucher?",
+                  Icons.card_giftcard,
+                  Colors.greenAccent,
+                      () => user.buyVoucherWithTickets(ticketCost, tier),
+                ),
+              );
+            }),
+
+            const SizedBox(height: 16),
+            // --- LIQUIDITY RETURN MARKET (Loop for selling back any tier) ---
+            _section(context, "VOUCHER LIQUIDITY RETURNS", Icons.assignment_return_rounded),
+            const SizedBox(height: 12),
+
+            ...GameEconomy.voucherTiers.map((tier) {
+              int ticketReward = GameEconomy.getTicketRewardForReturningVoucher(tier);
+
+              // Checking if user has at least one voucher of this specific tier
+              // (Assumed your provider can check this, if not fallback to total wallet check)
+              bool hasSpecificVoucher = false;
+              try {
+                hasSpecificVoucher = user.getVoucherCount(tier) > 0;
+              } catch (_) {
+                hasSpecificVoucher = user.voucherWallet >= tier;
+              }
+
+              return _modernTradeCard(
+                context,
+                title: "Return \$${tier.toStringAsFixed(2)} Voucher",
+                subtitle: "Need urgent tickets? Get back with 20% system fee",
+                costText: "\$${tier.toStringAsFixed(2)} Voucher",
+                rewardText: "+$ticketReward Tickets",
+                icon: Icons.refresh_rounded,
+                accentColor: Colors.orangeAccent,
+                onTap: () => _handleExchange(
+                  context,
+                  hasSpecificVoucher,
+                  "RETURN VOUCHER",
+                  "Return your \$${tier.toStringAsFixed(2)} Voucher to pool for $ticketReward Tickets?",
+                  Icons.refresh_rounded,
+                  Colors.orangeAccent,
+                      () => user.sellVoucherForTickets(tier, ticketReward),
+                ),
+              );
+            }),
+
+            const SizedBox(height: 28),
+
+            // --- SECTION 3: TICKET TO COINS EXCHANGE ---
+            _section(context, "COIN MARKET", Icons.currency_exchange_rounded),
+            const SizedBox(height: 12),
+            _modernTradeCard(
               context,
-              title: "Buy \$${tier.toStringAsFixed(2)} USD Voucher",
-              subtitle: "Convert tickets to real money voucher",
-              costText: "$ticketCost Tickets",
-              rewardText: "+\$${tier.toStringAsFixed(2)} Voucher",
-              icon: Icons.card_giftcard,
-              accentColor: Colors.greenAccent,
+              title: "Convert Tickets to Coins",
+              subtitle: "Exchange ${GameEconomy.ticketBundleBase} Tickets based on valuation",
+              costText: "${GameEconomy.ticketBundleBase} Tickets",
+              rewardText: "+${GameEconomy.coinsFromTicketBundle} Coins",
+              icon: Icons.monetization_on,
+              accentColor: Colors.amber,
               onTap: () => _handleExchange(
                 context,
-                user.tickets >= ticketCost,
-                "MINT \$${tier.toStringAsFixed(2)} VOUCHER",
-                "Convert $ticketCost Tickets into a \$${tier.toStringAsFixed(2)} cashout voucher?",
-                Icons.card_giftcard,
-                Colors.greenAccent,
-                    () => user.buyVoucherWithTickets(ticketCost, tier),
-              ),
-            );
-          }),
-
-          const SizedBox(height: 16),
-          // --- LIQUIDITY RETURN MARKET (Loop for selling back any tier) ---
-          _section(context, "VOUCHER LIQUIDITY RETURNS", Icons.assignment_return_rounded),
-          const SizedBox(height: 12),
-
-          ...GameEconomy.voucherTiers.map((tier) {
-            int ticketReward = GameEconomy.getTicketRewardForReturningVoucher(tier);
-
-            // Checking if user has at least one voucher of this specific tier
-            // (Assumed your provider can check this, if not fallback to total wallet check)
-            bool hasSpecificVoucher = false;
-            try {
-              hasSpecificVoucher = user.getVoucherCount(tier) > 0;
-            } catch (_) {
-              hasSpecificVoucher = user.voucherWallet >= tier;
-            }
-
-            return _modernTradeCard(
-              context,
-              title: "Return \$${tier.toStringAsFixed(2)} Voucher",
-              subtitle: "Need urgent tickets? Get back with 20% system fee",
-              costText: "\$${tier.toStringAsFixed(2)} Voucher",
-              rewardText: "+$ticketReward Tickets",
-              icon: Icons.refresh_rounded,
-              accentColor: Colors.orangeAccent,
-              onTap: () => _handleExchange(
-                context,
-                hasSpecificVoucher,
-                "RETURN VOUCHER",
-                "Return your \$${tier.toStringAsFixed(2)} Voucher to pool for $ticketReward Tickets?",
-                Icons.refresh_rounded,
-                Colors.orangeAccent,
-                    () => user.sellVoucherForTickets(tier, ticketReward),
-              ),
-            );
-          }),
-
-          const SizedBox(height: 28),
-
-          // --- SECTION 3: TICKET TO COINS EXCHANGE ---
-          _section(context, "COIN MARKET", Icons.currency_exchange_rounded),
-          const SizedBox(height: 12),
-          _modernTradeCard(
-            context,
-            title: "Convert Tickets to Coins",
-            subtitle: "Exchange ${GameEconomy.ticketBundleBase} Tickets based on valuation",
-            costText: "${GameEconomy.ticketBundleBase} Tickets",
-            rewardText: "+${GameEconomy.coinsFromTicketBundle} Coins",
-            icon: Icons.monetization_on,
-            accentColor: Colors.amber,
-            onTap: () => _handleExchange(
-              context,
-              user.tickets >= GameEconomy.ticketBundleBase,
-              "TRADE TICKETS",
-              "Convert ${GameEconomy.ticketBundleBase} Tickets into ${GameEconomy.coinsFromTicketBundle} Gold Coins?",
-              Icons.monetization_on,
-              Colors.amber,
-                  () => user.tradeTicketsForCoins(GameEconomy.ticketBundleBase, GameEconomy.coinsFromTicketBundle),
-            ),
-          ),
-
-          const SizedBox(height: 28),
-
-          // --- SECTION 4: IN-GAME CORE RESOURCE EXCHANGE ---
-          _section(context, "RESOURCE CORE EXCHANGE", Icons.swap_horizontal_circle_outlined),
-          const SizedBox(height: 12),
-
-          _modernTradeCard(
-            context,
-            title: "Purchase Power-Up",
-            subtitle: "Boost gameplay and unlock features",
-            costText: "${GameEconomy.buyPowerCoinCost} Coins",
-            rewardText: "+1 Power",
-            icon: Icons.bolt,
-            accentColor: Colors.purpleAccent,
-            onTap: () => _handleExchange(
-                context,
-                user.coins >= GameEconomy.buyPowerCoinCost,
-                "PURCHASE POWER",
-                "Exchange ${GameEconomy.buyPowerCoinCost} Coins for 1 Power-up?",
-                Icons.bolt,
-                Colors.purpleAccent,
-                user.buyPower
-            ),
-          ),
-
-          _modernTradeCard(
-            context,
-            title: "Liquidate Power-Up",
-            subtitle: "Sell extra powers back into gold reserves",
-            costText: "1 Power",
-            rewardText: "+${GameEconomy.sellPowerCoinReward} Coins",
-            icon: Icons.monetization_on_outlined,
-            accentColor: Colors.amber,
-            onTap: () => _handleExchange(
-                context,
-                user.powerUps >= 1,
-                "SELL POWER",
-                "Exchange 1 Power-up for ${GameEconomy.sellPowerCoinReward} Coins?",
-                Icons.monetization_on_outlined,
+                user.tickets >= GameEconomy.ticketBundleBase,
+                "TRADE TICKETS",
+                "Convert ${GameEconomy.ticketBundleBase} Tickets into ${GameEconomy.coinsFromTicketBundle} Gold Coins?",
+                Icons.monetization_on,
                 Colors.amber,
-                user.sellPower
+                    () => user.tradeTicketsForCoins(GameEconomy.ticketBundleBase, GameEconomy.coinsFromTicketBundle),
+              ),
             ),
-          ),
 
-          _modernTradeCard(
-            context,
-            title: "Recharge Life Vitality",
-            subtitle: "Sacrifice power energy for an extra game life",
-            costText: "${GameEconomy.powerForLifeCost} Power",
-            rewardText: "+1 Life",
-            icon: Icons.favorite_rounded,
-            accentColor: Colors.redAccent,
-            onTap: () => _handleExchange(
-                context,
-                user.powerUps >= GameEconomy.powerForLifeCost,
-                "RECHARGE LIFE",
-                "Exchange ${GameEconomy.powerForLifeCost} Power-up for 1 Life?",
-                Icons.favorite_rounded,
-                Colors.redAccent,
-                    () {
-                  user.tradePowerForLife();
-                  life.addLives(1);
-                }
+            const SizedBox(height: 28),
+
+            // --- SECTION 4: IN-GAME CORE RESOURCE EXCHANGE ---
+            _section(context, "RESOURCE CORE EXCHANGE", Icons.swap_horizontal_circle_outlined),
+            const SizedBox(height: 12),
+
+            _modernTradeCard(
+              context,
+              title: "Purchase Power-Up",
+              subtitle: "Boost gameplay and unlock features",
+              costText: "${GameEconomy.buyPowerCoinCost} Coins",
+              rewardText: "+1 Power",
+              icon: Icons.bolt,
+              accentColor: Colors.purpleAccent,
+              onTap: () => _handleExchange(
+                  context,
+                  user.coins >= GameEconomy.buyPowerCoinCost,
+                  "PURCHASE POWER",
+                  "Exchange ${GameEconomy.buyPowerCoinCost} Coins for 1 Power-up?",
+                  Icons.bolt,
+                  Colors.purpleAccent,
+                  user.buyPower
+              ),
             ),
-          ),
 
-          const SizedBox(height: 28),
+            _modernTradeCard(
+              context,
+              title: "Liquidate Power-Up",
+              subtitle: "Sell extra powers back into gold reserves",
+              costText: "1 Power",
+              rewardText: "+${GameEconomy.sellPowerCoinReward} Coins",
+              icon: Icons.monetization_on_outlined,
+              accentColor: Colors.amber,
+              onTap: () => _handleExchange(
+                  context,
+                  user.powerUps >= 1,
+                  "SELL POWER",
+                  "Exchange 1 Power-up for ${GameEconomy.sellPowerCoinReward} Coins?",
+                  Icons.monetization_on_outlined,
+                  Colors.amber,
+                  user.sellPower
+              ),
+            ),
 
-          // --- Section 5: Snake Skins ---
-          _section(context, "PREMIUM SNAKE SKINS", Icons.palette_outlined),
-          const SizedBox(height: 12),
+            _modernTradeCard(
+              context,
+              title: "Recharge Life Vitality",
+              subtitle: "Sacrifice power energy for an extra game life",
+              costText: "${GameEconomy.powerForLifeCost} Power",
+              rewardText: "+1 Life",
+              icon: Icons.favorite_rounded,
+              accentColor: Colors.redAccent,
+              onTap: () => _handleExchange(
+                  context,
+                  user.powerUps >= GameEconomy.powerForLifeCost,
+                  "RECHARGE LIFE",
+                  "Exchange ${GameEconomy.powerForLifeCost} Power-up for 1 Life?",
+                  Icons.favorite_rounded,
+                  Colors.redAccent,
+                      () {
+                    user.tradePowerForLife();
+                    life.addLives(1);
+                  }
+              ),
+            ),
 
-          _buildCategoryRow(context, user, "COMMON", SkinRarity.common),
-          _buildCategoryRow(context, user, "RARE", SkinRarity.rare),
-          _buildCategoryRow(context, user, "EPIC", SkinRarity.epic),
-          _buildCategoryRow(context, user, "LEGENDARY", SkinRarity.legendary),
-          _buildCategoryRow(context, user, "ULTIMATE", SkinRarity.ultimate),
-        ],
+            const SizedBox(height: 28),
+
+            // --- Section 5: Snake Skins ---
+            _section(context, "PREMIUM SNAKE SKINS", Icons.palette_outlined),
+            const SizedBox(height: 12),
+
+            _buildCategoryRow(context, user, "COMMON", SkinRarity.common),
+            _buildCategoryRow(context, user, "RARE", SkinRarity.rare),
+            _buildCategoryRow(context, user, "EPIC", SkinRarity.epic),
+            _buildCategoryRow(context, user, "LEGENDARY", SkinRarity.legendary),
+            _buildCategoryRow(context, user, "ULTIMATE", SkinRarity.ultimate),
+          ],
+        ),
       ),
     );
   }

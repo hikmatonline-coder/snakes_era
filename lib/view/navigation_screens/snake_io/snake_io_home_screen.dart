@@ -4,6 +4,7 @@ import 'package:snakes_era/core/widgets/referral_dialogs.dart';
 import 'package:snakes_era/provider/social_provider.dart';
 import '../../../core/constants.dart';
 import '../../../core/painters/home_snake_painter.dart';
+import '../../../core/widgets/life_timer_widget.dart';
 import '../../../core/widgets/no_live_sheet.dart';
 import '../../../model/snake_skin_model.dart';
 import '../../../provider/life_provider.dart';
@@ -11,7 +12,6 @@ import '../../../provider/user_provider.dart';
 import '../leaderboard_screen.dart';
 import 'snake_io_wrapper.dart';
 
-// 🔴 CONVERTED TO STATEFULWIDGET
 class SnakeIOHomeScreen extends StatefulWidget {
   const SnakeIOHomeScreen({super.key});
 
@@ -47,6 +47,32 @@ class _SnakeIOHomeScreenState extends State<SnakeIOHomeScreen> {
               padding: const EdgeInsets.symmetric(horizontal: 16.0, vertical: 10.0),
               child: Column(
                 children: [
+
+                  // ==========================================
+                  // 💰 1. NEW TOP BALANCE BAR (SHOP STYLE)
+                  // ==========================================
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      // LIVES / HEARTS (Left Side)
+                      const LifeTimerWidget(),
+
+                      // COINS & POWERUPS (Right Side)
+                      Row(
+                        children: [
+                          _buildStatChip(context, Icons.confirmation_number, "${user.tickets}", Colors.cyanAccent),
+                          const SizedBox(width: 10),
+                          _buildStatChip(context, Icons.bolt, "${user.powerUps}", Colors.purpleAccent),
+                          const SizedBox(width: 10),
+                          _buildStatChip(context, Icons.monetization_on, "${user.coins}", Colors.amber),
+                        ],
+                      ),
+                    ],
+                  ),
+
+                  const SizedBox(height: 12),
+                  Divider(color: Colors.white.withOpacity(0.08), height: 1),
+                  const SizedBox(height: 12),
 
                   // ==========================================
                   // 🎮 TOP CONTROL DECK
@@ -177,6 +203,31 @@ class _SnakeIOHomeScreenState extends State<SnakeIOHomeScreen> {
                 ],
               ),
             ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  // ==========================================
+  // 🎫 NEW STAT CHIP WIDGET HELPER
+  // ==========================================
+  Widget _buildStatChip(BuildContext context, IconData icon, String value, Color iconColor) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+      decoration: BoxDecoration(
+        color: Colors.white.withOpacity(0.04),
+        borderRadius: BorderRadius.circular(20),
+        border: Border.all(color: Colors.white.withOpacity(0.08)),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(icon, color: iconColor, size: 18),
+          const SizedBox(width: 5),
+          Text(
+            value,
+            style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13, color: Colors.white),
           ),
         ],
       ),
