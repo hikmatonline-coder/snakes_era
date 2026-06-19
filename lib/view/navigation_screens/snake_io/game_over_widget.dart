@@ -5,16 +5,21 @@ import '../../../provider/snake_game_provider.dart';
 import '../../../provider/user_provider.dart';
 import '../../../provider/ads_provider.dart';
 
-class GameOverOverlay extends StatelessWidget {
+class GameOverOverlay extends StatefulWidget {
   final int score;
   final VoidCallback onLoseLife;
 
-  GameOverOverlay({
+  const GameOverOverlay({
     super.key,
     required this.score,
     required this.onLoseLife,
   });
 
+  @override
+  State<GameOverOverlay> createState() => _GameOverOverlayState();
+}
+
+class _GameOverOverlayState extends State<GameOverOverlay> {
   final List<String> compliments = [
     "Spectacular Effort!",
     "You're a Snake Legend!",
@@ -25,27 +30,35 @@ class GameOverOverlay extends StatelessWidget {
   ];
 
   @override
+  void initState() {
+    super.initState();
+
+    WidgetsBinding.instance.addPostFrameCallback((_) async {
+      final gameProvider = Provider.of<SnakeGameProvider>(context, listen: false);
+      final user = Provider.of<UserProvider>(context, listen: false);
+
+      // 🌟 STEP 1: Pehle TICKETS CLAIM KAREIN (Bina kisi delay ke, taake state 0 na ho)
+      gameProvider.finalizeAndClaimRemainingTickets((remainingTickets) async {
+        if (remainingTickets > 0) {
+          await user.addFreeTickets(remainingTickets); // Safely added to total balance
+        }
+      });
+
+      // 🌟 STEP 2: High Score baad mein update karein kyunki yeh internet par time leta hy
+      await user.updateHighScore(gameProvider.score);
+    });
+  }
+
+  @override
   Widget build(BuildContext context) {
     final gameProvider = Provider.of<SnakeGameProvider>(context);
     final user = Provider.of<UserProvider>(context, listen: false);
     final adProv = Provider.of<AdProvider>(context);
 
-    // -------------------------------------------------------------------------
-    // AUTOMATIC BACKUP COMMIT + STANDARD FRACTIONAL TICKETS CLAIM
-    // -------------------------------------------------------------------------
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      user.updateHighScore(gameProvider.score);
-
-      // Mount hote hi bache hue fractional tickets (e.g. 500 score k 5 tickets) secure karein
-      gameProvider.finalizeAndClaimRemainingTickets((remainingTickets) {
-        user.addFreeTickets(remainingTickets);
-      });
-    });
-
     final bool canRevive = gameProvider.adsWatchedThisSession < gameProvider.maxAdsPerSession;
-    final isNewBest = score > user.highScore;
+    final isNewBest = widget.score > user.highScore;
 
-    final randomCompliment = compliments[min(score ~/ 10, compliments.length - 1)];
+    final randomCompliment = compliments[min(widget.score ~/ 10, compliments.length - 1)];
 
     bool adIsReady = adProv.isRewardedReady;
     bool isAdLoading = adProv.isAdLoading;
@@ -91,12 +104,16 @@ class GameOverOverlay extends StatelessWidget {
                       await adProv.showRewardedAd(
                         onUserEarnedReward: (ad, rewardItem) async {
                           gameProvider.doubleScore();
-                          await user.updateHighScore(gameProvider.score);
 
-                          // NEW: Score double hone par mazeed deserved tickets claim karein safely!
-                          gameProvider.finalizeAndClaimRemainingTickets((doubleRemainingTickets) {
-                            user.addFreeTickets(doubleRemainingTickets);
+                          // 🌟 STEP 1: Pehle double score wale mazeed tickets claim karein instantly
+                          gameProvider.finalizeAndClaimRemainingTickets((doubleRemainingTickets) async {
+                            if (doubleRemainingTickets > 0) {
+                              await user.addFreeTickets(doubleRemainingTickets);
+                            }
                           });
+
+                          // 🌟 STEP 2: High score baad mein update karein
+                          await user.updateHighScore(gameProvider.score);
                         },
                       );
                       gameProvider.isPaused = false;
@@ -134,7 +151,7 @@ class GameOverOverlay extends StatelessWidget {
               Text("BEST: ${isNewBest ? gameProvider.score : user.highScore}",
                   style: const TextStyle(color: Colors.white54, fontSize: 18)),
 
-              // --- NEW: TOTAL MATCH EARNINGS DISPLAY PANEL ---
+              // --- TOTAL MATCH EARNINGS DISPLAY PANEL ---
               const SizedBox(height: 10),
               Container(
                 padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
@@ -207,11 +224,12 @@ class GameOverOverlay extends StatelessWidget {
               TextButton(
                 onPressed: () async {
                   try {
-                    await user.updateHighScore(score).timeout(const Duration(seconds: 4));
+                    // Yahan widget.score use hoga kyunki hum StatefulWidget mein hain
+                    await user.updateHighScore(widget.score).timeout(const Duration(seconds: 4));
                   } catch (e) {
                     debugPrint("Score update failed, skipping to exit: $e");
                   } finally {
-                    onLoseLife();
+                    widget.onLoseLife();
                   }
                 },
                 child: Text(

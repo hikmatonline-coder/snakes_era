@@ -140,6 +140,10 @@ class UserProvider with ChangeNotifier {
       if (snapshot.exists) {
         final data = snapshot.data()!;
         await _applyRemoteData(data);
+
+        // 🔥 NAYA CODE: Remote data load hone ke furan baad rewards check karein
+        await checkAndClaimLeaderboardRewards(data);
+
       } else {
         await _createDefaultFirestoreProfile();
       }
@@ -148,6 +152,84 @@ class UserProvider with ChangeNotifier {
       debugPrint('Failed to load user data from Firestore: $e');
     } finally {
       notifyListeners();
+    }
+  }
+
+  // ========================================================
+  //     AUTOMATIC UTC LEADERBOARD REWARD CLAIM ENGINE
+  // ========================================================
+  Future<void> checkAndClaimLeaderboardRewards(Map<String, dynamic> data) async {
+    final currentUid = _uid;
+    if (currentUid == null) return;
+
+    // 1. Kal (Yesterday) ki exact UTC date nikalyein
+    final nowUtc = DateTime.now().toUtc();
+    final yesterdayUtc = nowUtc.subtract(const Duration(days: 1));
+    final yesterdayStr = "${yesterdayUtc.year}-${yesterdayUtc.month.toString().padLeft(2, '0')}-${yesterdayUtc.day.toString().padLeft(2, '0')}";
+
+    // 2. Check karein kya user pehle hi kal ka reward claim kar chuka hy?
+    String lastClaimed = data['lastClaimedDailyDate'] as String? ?? '';
+    if (lastClaimed == yesterdayStr) {
+      debugPrint("ℹ️ Leaderboard rewards for $yesterdayStr already claimed.");
+      return;
+    }
+
+    try {
+      // 3. Firestore se KAL KE TOP 10 users mangwain
+      final snapshot = await _db
+          .collection('users')
+          .where('dailyHighScoreDate', isEqualTo: yesterdayStr)
+          .orderBy('dailyHighScore', descending: true)
+          .limit(10)
+          .get();
+
+      int userRank = -1;
+
+      // 4. Check karein kya hamara user is list mein maujood hy?
+      for (int i = 0; i < snapshot.docs.length; i++) {
+        if (snapshot.docs[i].id == currentUid) {
+          userRank = i + 1; // Rank 1 se start hoti hy (index + 1)
+          break;
+        }
+      }
+
+      final docRef = _userDoc;
+      if (docRef == null) return;
+
+      // 5. Agar user Top 10 mein tha, to rewards calculate kar k local state me add karein
+      if (userRank != -1) {
+        int rewardCoins = 0;
+        int rewardPups = 0;
+        int rewardTkts = 0;
+
+        if (userRank == 1) { rewardCoins = 120; rewardPups = 12; rewardTkts = 120; }
+        else if (userRank == 2) { rewardCoins = 80; rewardPups = 8; rewardTkts = 80; }
+        else if (userRank == 3) { rewardCoins = 50; rewardPups = 5; rewardTkts = 50; }
+        else if (userRank >= 4 && userRank <= 10) { rewardCoins = 30; rewardPups = 3; rewardTkts = 30; }
+
+        // Local variables me add karein
+        _coins += rewardCoins;
+        _powerUps += rewardPups;
+        _tickets += rewardTkts;
+
+        await docRef.set({
+          'coins': _coins,
+          'powerUps': _powerUps,
+          'tickets': _tickets,
+          'lastClaimedDailyDate': yesterdayStr,
+        }, SetOptions(merge: true));
+
+        debugPrint("🎉 Congratulations! Leaderboard Rank #$userRank reward added to your balance.");
+        notifyListeners();
+
+      } else {
+        await docRef.set({
+          'lastClaimedDailyDate': yesterdayStr,
+        }, SetOptions(merge: true));
+        debugPrint("❌ KYou were not in top 10, better luck next time!");
+      }
+    } catch (e) {
+      debugPrint("⚠️ Error checking leaderboard rewards: $e");
     }
   }
 
@@ -285,9 +367,9 @@ class UserProvider with ChangeNotifier {
     return false;
   }
 
-  void addFreeTickets(int amount) {
+  Future<void> addFreeTickets(int amount) async {
     _tickets += amount;
-    _syncBalancesToFirestore();
+    await _syncBalancesToFirestore();
   }
 
   void addVoucherReward(double amount) {
@@ -540,7 +622,7 @@ class UserProvider with ChangeNotifier {
   Future<void> updateHighScore(int newScore) async {
     final docRef = _userDoc;
     if (docRef == null) return;
-    final now = DateTime.now();
+    final now = DateTime.now().toUtc();
     // Unique Date format keys (e.g., "2026-06-12", "2026-W24", "2026-06")
     final todayStr = "${now.year}-${now.month.toString().padLeft(2, '0')}-${now.day.toString().padLeft(2, '0')}";
     final weekStr = "${now.year}-W${getIsoWeekNumber(now).toString().padLeft(2, '0')}";

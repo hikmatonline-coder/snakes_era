@@ -78,8 +78,13 @@ class _NoLivesSheetState extends State<NoLivesSheet> {
                   height: 20,
                   child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white),
                 )
-                    : const Icon(Icons.play_circle_fill),
-                label: Text(buttonText),
+                    : const Icon(Icons.play_circle_fill, color: Colors.white,),
+                label: Text(
+                    buttonText,
+                  style: TextStyle(
+                    color: Colors.white
+                  ),
+                ),
                 style: ElevatedButton.styleFrom(
                   backgroundColor: AppConstants.primaryColor,
                   disabledBackgroundColor: Colors.white10,

@@ -19,26 +19,25 @@ class SnakeIOGame extends StatefulWidget {
 }
 
 class _SnakeIOGameState extends State<SnakeIOGame> {
-
-  Timer? _pauseAdTimer; // To handle the 3-second ad delay
+  Timer? _pauseAdTimer;
   Offset? joystickPivot;
+
+  // 🎯 GAME OVER ENGINE GUARD (Infinite loop se bachane ke liye)
+  bool _hasProcessedGameOver = false;
 
   void _togglePauseWithAd(SnakeGameProvider game) {
     final adProv = Provider.of<AdProvider>(context, listen: false);
 
     if (!game.isPaused) {
-      // STARTING THE PAUSE
       game.togglePause();
 
-      // Set a timer to show the ad after 3 seconds
       _pauseAdTimer = Timer(const Duration(seconds: 3), () {
         if (game.isPaused && mounted) {
           adProv.showInterstitialAd();
         }
       });
     } else {
-      // RESUMING THE GAME
-      _pauseAdTimer?.cancel(); // Cancel the ad if they resume early
+      _pauseAdTimer?.cancel();
       game.togglePause();
     }
   }
@@ -46,11 +45,12 @@ class _SnakeIOGameState extends State<SnakeIOGame> {
   @override
   void initState() {
     super.initState();
+    _hasProcessedGameOver = false; // Reset flag on start
+
     WidgetsBinding.instance.addPostFrameCallback((_) {
       final user = Provider.of<UserProvider>(context, listen: false);
       final adProv = Provider.of<AdProvider>(context, listen: false);
 
-      // Pre-load both types of ads
       adProv.loadInterstitialAd();
       adProv.loadRewardedAd();
 
@@ -58,53 +58,52 @@ class _SnakeIOGameState extends State<SnakeIOGame> {
             (s) => s.id == user.currentSkinId,
         orElse: () => snakeSkins.first,
       );
-      Provider.of<SnakeGameProvider>(context, listen: false).startGame(skin.bodyColors);
+
+      // 🚀 GAME START WITH LIVE REWARDS CALLBACK LINKED
+      Provider.of<SnakeGameProvider>(context, listen: false).startGame(
+        skin.bodyColors,
+        onLiveTicketsRewarded: (tickets, message) {
+          // Live gameplay ke dauran milestones hit hone par tickets sath sath add honge
+          user.addFreeTickets(tickets);
+          debugPrint("🎯 [LIVE REWARD]: $message");
+        },
+      );
     });
   }
 
   @override
   void dispose() {
-    // Ensure timer stops to prevent memory leaks
-    // final game = Provider.of<SnakeGameProvider>(context, listen: false);
-    // game.gameTimer?.cancel();
+    _pauseAdTimer?.cancel();
     super.dispose();
   }
 
-  // Helper for Rewarded Ads (Revive & Double Score)
   void _handleRewardedAdAction(VoidCallback onGrantReward) async {
     final adProvider = Provider.of<AdProvider>(context, listen: false);
     final game = Provider.of<SnakeGameProvider>(context, listen: false);
 
-    // 1. Pause the game engine immediately before showing the ad
     game.isPaused = true;
 
     if (adProvider.rewardedAd == null) {
-      game.isPaused = false; // Unpause if ad fails
+      game.isPaused = false;
       onGrantReward();
       return;
     }
 
     await adProvider.showRewardedAd(
       onUserEarnedReward: (ad, reward) {
-        // 2. The reward logic will now handle unpausing via revivePlayer()
         onGrantReward();
       },
     );
-
-    // Safety: If the user closes the ad without a reward, decide if you want to unpause
-    // game.isPaused = false;
   }
 
   void _exitGame() {
     final adProvider = Provider.of<AdProvider>(context, listen: false);
     final game = Provider.of<SnakeGameProvider>(context, listen: false);
 
-    // Cancel timer and reset game state before leaving
     game.gameTimer?.cancel();
     game.isGameOver = false;
     game.isPaused = false;
 
-    // Show ad, then pop the screen after a tiny delay or via callback
     adProvider.showInterstitialAd();
 
     if (mounted) {
@@ -117,6 +116,9 @@ class _SnakeIOGameState extends State<SnakeIOGame> {
     final lifeProv = Provider.of<LifeProvider>(context, listen: false);
 
     if (lifeProv.lives > 0) {
+      setState(() {
+        _hasProcessedGameOver = false; // Reset guard for next life/try
+      });
       lifeProv.consumeLife();
       game.resetGame();
     } else {
@@ -134,10 +136,21 @@ class _SnakeIOGameState extends State<SnakeIOGame> {
       orElse: () => snakeSkins.first,
     );
 
-    // Auto-update high score when game ends
-    if (game.isGameOver) {
+    // 🎯 SECURE SINGLE-SHOT SCORE & TICKETS SUBMISSION
+    if (game.isGameOver && !_hasProcessedGameOver) {
+      _hasProcessedGameOver = true; // Lock it immediately
+
       WidgetsBinding.instance.addPostFrameCallback((_) {
+        print("🏁 [GAME OVER DETECTED] Submitting Data Securely...");
+
+        // 1. Submit High Score (Exactly Once)
         user.updateHighScore(game.score);
+
+        // 2. Claim & Finalize Remaining Match End Tickets (Exactly Once)
+        game.finalizeAndClaimRemainingTickets((remainingTickets) {
+          user.addFreeTickets(remainingTickets);
+          print("🎟️ [REWARDS SUBMITTED] +$remainingTickets Game-End Tickets Claimed!");
+        });
       });
     }
 
@@ -145,24 +158,17 @@ class _SnakeIOGameState extends State<SnakeIOGame> {
       backgroundColor: const Color(0xFF0F0F0F),
       body: Stack(
         children: [
-          // 1. GAMEPLAY LAYER (UPDATED FOR FLOATING TOUCH)
+          // 1. GAMEPLAY LAYER
           RepaintBoundary(
             child: GestureDetector(
               onPanStart: (details) {
-                // 📍 Jis jagah pehli dafa touch kiya, wo joystick ka center ban gaya
                 joystickPivot = details.localPosition;
               },
               onPanUpdate: (details) {
                 if (joystickPivot != null) {
-                  // Current touch aur start touch ka darmiyan ka gap nikalen
                   Offset delta = details.localPosition - joystickPivot!;
-
-                  // Choti thartharahat se bachne ke liye 5 pixels ka gap lazmi ho
                   if (delta.distance > 5) {
-                    // 🔄 Saanp ko direct relative angle bheinjo
                     game.setTargetAngle(delta.direction);
-
-                    // 🕹️ Joystick Lock: Agar haath boht door ghaseetain toh pivot sath move kare
                     if (delta.distance > 45) {
                       joystickPivot = details.localPosition - (delta / delta.distance) * 45;
                     }
@@ -182,12 +188,12 @@ class _SnakeIOGameState extends State<SnakeIOGame> {
             ),
           ),
 
-          // 2. PAUSE BUTTON (Restored)
+          // 2. PAUSE BUTTON
           Positioned(
             top: 50,
             right: 20,
             child: GestureDetector(
-              onTap: () => _togglePauseWithAd(game), // Updated call
+              onTap: () => _togglePauseWithAd(game),
               child: Container(
                 padding: const EdgeInsets.all(10),
                 decoration: BoxDecoration(
@@ -203,6 +209,7 @@ class _SnakeIOGameState extends State<SnakeIOGame> {
               ),
             ),
           ),
+
           // 3. HUD LAYERS
           Positioned(
             top: 50,
@@ -223,7 +230,7 @@ class _SnakeIOGameState extends State<SnakeIOGame> {
                       fontSize: 22,
                       fontWeight: FontWeight.bold,
                       letterSpacing: 1.2,
-                      shadows: [Shadow(blurRadius: 4, color: Colors.black)],
+                      shadows: const [Shadow(blurRadius: 4, color: Colors.black)],
                     ),
                   ),
                   Text(
@@ -253,7 +260,7 @@ class _SnakeIOGameState extends State<SnakeIOGame> {
           if (game.isPaused)
             Positioned.fill(
               child: BackdropFilter(
-                filter: ImageFilter.blur(sigmaX: 5, sigmaY: 5), // Blurs the game world
+                filter: ImageFilter.blur(sigmaX: 5, sigmaY: 5),
                 child: Container(
                   color: Colors.black.withOpacity(0.4),
                   child: Center(
@@ -324,8 +331,12 @@ class _SnakeIOGameState extends State<SnakeIOGame> {
             GameOverOverlay(
               score: game.score,
               onLoseLife: () {
-                // Handle navigation back to menu cleanly
-                Navigator.of(context).popUntil((route) => route.isFirst);
+
+                final lifeProv = Provider.of<LifeProvider>(context, listen: false);
+                if (lifeProv.lives > 0) {
+                  lifeProv.consumeLife();
+                }
+                _exitGame();
               },
             ),
         ],
@@ -334,7 +345,7 @@ class _SnakeIOGameState extends State<SnakeIOGame> {
   }
 }
 
-// --- Sub-Widgets ---
+// --- Sub-Widgets (Leaderboard, Minimap, Boost) ---
 
 class _Leaderboard extends StatelessWidget {
   final SnakeGameProvider game;

@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:snakes_era/core/widgets/referral_dialogs.dart';
+import 'package:package_info_plus/package_info_plus.dart';
 import 'package:snakes_era/provider/social_provider.dart';
 import '../../../core/constants.dart';
 import '../../../core/painters/home_snake_painter.dart';
@@ -23,6 +24,26 @@ class _SnakeIOHomeScreenState extends State<SnakeIOHomeScreen> {
   // ⚙️ TEMPORARY SETTINGS STATES (Saves value while app is running)
   bool _isSoundOn = true;
   bool _isHapticOn = true;
+
+  String _appVersion = "1.0.0";
+
+  @override
+  void initState() {
+    super.initState();
+    _loadAppVersion();
+  }
+
+  Future<void> _loadAppVersion() async {
+    try {
+      final PackageInfo packageInfo = await PackageInfo.fromPlatform();
+      setState(() {
+        // packageInfo.version aap ko '1.0.12' dega
+        _appVersion = packageInfo.version;
+      });
+    } catch (e) {
+      debugPrint("Failed to load app version: $e");
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -197,7 +218,7 @@ class _SnakeIOHomeScreenState extends State<SnakeIOHomeScreen> {
 
                   // FOOTER INFO
                   Text(
-                    "v1.0.0 • SNAKES ERA",
+                    "v$_appVersion • SNAKES ERA",
                     style: TextStyle(color: Colors.white.withOpacity(0.15), fontSize: 10, letterSpacing: 1),
                   ),
                 ],

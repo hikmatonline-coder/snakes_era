@@ -4,7 +4,7 @@ import 'package:provider/provider.dart';
 import 'package:snakes_era/provider/ads_provider.dart';
 import 'package:snakes_era/provider/review_provider.dart';
 import 'package:snakes_era/provider/social_provider.dart';
-import 'auth/auth_wrapper.dart';
+import 'package:snakes_era/view/splash_screen.dart';
 import 'core/ads_initializer.dart';
 import 'core/constants.dart';
 import 'core/widgets/app_open_ad_handler.dart';
@@ -49,21 +49,18 @@ class QuantXGame extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    // Using Consumer is better for performance at the root level
     return Consumer<ThemeProvider>(
       builder: (context, themeProvider, child) {
         return MaterialApp(
           title: AppConstants.appName,
           debugShowCheckedModeBanner: false,
-
-          // Theme Configuration
           theme: AppTheme.lightTheme,
           darkTheme: AppTheme.darkTheme,
           themeMode: themeProvider.themeMode,
 
-          // Navigation
+          // 🎯 Entry point securely points to SplashScreen
           home: const AppOpenAdHandler(
-            child: AuthWrapper(),
+            child: SplashScreen(),
           ),
         );
       },

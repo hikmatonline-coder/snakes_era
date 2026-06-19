@@ -55,8 +55,8 @@ class SnakeGameProvider with ChangeNotifier {
   void resetGame() {
     gameTimer?.cancel();
     playerPos = const Offset(3000, 3000);
-
     playerBody = List.generate(20, (i) => Offset(3000.0, 3000.0 + (i * spacing)));
+    isPaused = false;
     score = 0;
     adsWatchedThisSession = 0;
     isScoreDoubled = false;
@@ -611,6 +611,7 @@ class SnakeGameProvider with ChangeNotifier {
   }
 
   void setTargetAngle(double angle) => targetAngle = angle;
+
   void setBoosting(bool val) { isBoosting = val; notifyListeners(); }
 
   @override

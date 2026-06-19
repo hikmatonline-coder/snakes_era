@@ -5,7 +5,6 @@ import 'package:provider/provider.dart';
 import '../provider/auth_provider.dart';
 import '../view/auth_screen.dart';
 import '../view/navigation_screens/navigation_screen.dart';
-import '../view/splash_screen.dart';
 
 // Screens
 
@@ -16,21 +15,26 @@ class AuthWrapper extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    // We use Consumer to listen to AuthProvider changes specifically
     return Consumer<AuthProvider>(
       builder: (context, auth, child) {
-
-        // 1. App is still loading local tokens or Firebase state
+        // 1. Agar background mein auth data fetch ho rha hu
         if (auth.isInitializing) {
-          return const SplashScreen();
+          return const Scaffold(
+            backgroundColor: Color(0xFF0F172A),
+            body: Center(
+              child: CircularProgressIndicator(
+                color: Colors.cyanAccent,
+              ),
+            ),
+          );
         }
 
-        // 2. User is logged in (UserModel exists)
+        // 2. User logged in hy -> Send to Main Game Navigation
         if (auth.isAuthenticated) {
           return const NavigationScreen();
         }
 
-        // 3. No user session found - show Login
+        // 3. Koi session nahi mila -> Send to Login/Signup Screen
         return const AuthScreen();
       },
     );

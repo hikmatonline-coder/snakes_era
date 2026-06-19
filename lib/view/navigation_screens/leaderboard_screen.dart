@@ -34,10 +34,31 @@ class _LeaderboardScreenState extends State<LeaderboardScreen> with SingleTicker
     _startResetCountdown();
   }
 
-  void _initLeaderboardStreams() {
-    final now = DateTime.now();
+  // 1. Timer Engine ko 12:00 PM se 00:00 AM (Midnight UTC = 5:00 AM PKT) par set karein
+  void _startResetCountdown() {
+    _countdownTimer = Timer.periodic(const Duration(seconds: 1), (timer) {
+      if (!mounted) return;
 
-    // ISO Week calculation direct math se (taake initState me provider ka jhamela na ho)
+      DateTime nowUtc = DateTime.now().toUtc();
+      DateTime targetTodayUtc = DateTime.utc(nowUtc.year, nowUtc.month, nowUtc.day, 0, 0, 0);
+
+      DateTime nextReset = nowUtc.isBefore(targetTodayUtc)
+          ? targetTodayUtc
+          : targetTodayUtc.add(const Duration(days: 1));
+
+      Duration diff = nextReset.difference(nowUtc);
+
+      setState(() {
+        _timeLeftStr = "${diff.inHours.toString().padLeft(2, '0')}:"
+            "${(diff.inMinutes % 60).toString().padLeft(2, '0')}:"
+            "${(diff.inSeconds % 60).toString().padLeft(2, '0')}";
+      });
+    });
+  }
+
+  void _initLeaderboardStreams() {
+    final now = DateTime.now().toUtc();
+
     final dayOfYear = now.difference(DateTime(now.year, 1, 1)).inDays;
     final currentWeek = ((dayOfYear - now.weekday + 10) / 7).floor();
 
@@ -45,7 +66,6 @@ class _LeaderboardScreenState extends State<LeaderboardScreen> with SingleTicker
     final weekStr = "${now.year}-W${currentWeek.toString().padLeft(2, '0')}";
     final monthStr = "${now.year}-${now.month.toString().padLeft(2, '0')}";
 
-    // Connection setup ONLY ONCE
     _dailyStream = FirebaseFirestore.instance
         .collection('users')
         .where('dailyHighScoreDate', isEqualTo: todayStr)
@@ -73,28 +93,6 @@ class _LeaderboardScreenState extends State<LeaderboardScreen> with SingleTicker
     _tabController.dispose();
     _countdownTimer?.cancel();
     super.dispose();
-  }
-
-  // ⏰ UK SERVER TIME 12:00 PM LIVE COUNTDOWN ENGINE
-  void _startResetCountdown() {
-    _countdownTimer = Timer.periodic(const Duration(seconds: 1), (timer) {
-      if (!mounted) return;
-
-      DateTime nowUtc = DateTime.now().toUtc();
-      DateTime targetTodayUtc = DateTime.utc(nowUtc.year, nowUtc.month, nowUtc.day, 12, 0, 0);
-
-      DateTime nextReset = nowUtc.isBefore(targetTodayUtc)
-          ? targetTodayUtc
-          : targetTodayUtc.add(const Duration(days: 1));
-
-      Duration diff = nextReset.difference(nowUtc);
-
-      setState(() {
-        _timeLeftStr = "${diff.inHours.toString().padLeft(2, '0')}:"
-            "${(diff.inMinutes % 60).toString().padLeft(2, '0')}:"
-            "${(diff.inSeconds % 60).toString().padLeft(2, '0')}";
-      });
-    });
   }
 
   // 💰 LIVE REWARD MULTIPLIER MATH
@@ -368,6 +366,7 @@ class _TopUserCircle extends StatelessWidget {
           // 🎁 MINI VISUAL REWARD BADGE FOR TOP 3 PODIUM
           if (user != null)
             Container(
+              margin: EdgeInsets.symmetric(horizontal: 8),
               padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 3),
               decoration: BoxDecoration(color: Colors.white.withOpacity(0.05), borderRadius: BorderRadius.circular(8)),
               child: Column(
