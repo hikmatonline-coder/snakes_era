@@ -16,6 +16,7 @@ class SnakeGameProvider with ChangeNotifier {
   double targetAngle = 0.0;
   List<Offset> playerBody = [];
   Set<NPCSnake> deadNPCs = {};
+  bool isLootBlinkingState = false;
 
   List<Food> foods = [];
   Map<String, List<Food>> chunkedFoods = {};
@@ -79,6 +80,16 @@ class SnakeGameProvider with ChangeNotifier {
 
     _lastTick = DateTime.now();
     gameTimer = Timer.periodic(const Duration(milliseconds: 16), (timer) => _gameTick());
+    notifyListeners();
+  }
+
+  // 🎯 DYNAMIC CLEAN EXIT ENGINE (Call this when user explicitly exits to Home)
+  void stopGameEngine() {
+    gameTimer?.cancel();
+    gameTimer = null;
+    isGameOver = true; // Taake koi tickers ya UI update background mein na chale
+    isPaused = false;
+    onLiveTicketsRewarded = null; // Callback remove karein memory leaks se bachne ke liye
     notifyListeners();
   }
 
@@ -152,15 +163,63 @@ class SnakeGameProvider with ChangeNotifier {
 
   void _handleSnakeDeath(List<Offset> bodySegments, List<Color> snakeColors) {
     var rng = Random();
-    for (int i = 0; i < bodySegments.length; i += 6) {
-      Food deathLoot = Food(
-        bodySegments[i] + Offset(rng.nextDouble() * 12 - 6, rng.nextDouble() * 12 - 6),
-        rng.nextInt(3),
-        snakeColors[i % snakeColors.length],
-        isLoot: true,
+    List<Food> npcLootItems = [];
+
+    for (int i = 0; i < bodySegments.length; i += 3) {
+      Offset segmentPos = bodySegments[i];
+
+      // 🎨 Premium Candy Pastel Colors (Jo aankhon ko chubhain gey nahi)
+      List<Color> premiumColors = [
+        const Color(0xFFFF5E7E), // Soft Candy Pink
+        const Color(0xFF00F5D4), // Premium Mint/Teal
+        const Color(0xFF7B2CBF), // Deep Royal Purple
+        const Color(0xFFFFB703), // Juicy Mango Orange
+        const Color(0xFF9EF01A), // Electric Lime Green
+        const Color(0xFF4CC9F0), // Sky Neon Blue
+      ];
+      Color foodColor = premiumColors[rng.nextInt(premiumColors.length)];
+
+      Food deathLoot1 = Food(segmentPos, 2, foodColor, isLoot: true);
+      _addNewFood(deathLoot1);
+      npcLootItems.add(deathLoot1);
+
+      Offset tightOffset = Offset(
+        (rng.nextDouble() - 0.5) * 15,
+        (rng.nextDouble() - 0.5) * 15,
       );
-      _addNewFood(deathLoot);
+
+      Food deathLoot2 = Food(segmentPos + tightOffset, 2, foodColor, isLoot: true);
+      _addNewFood(deathLoot2);
+      npcLootItems.add(deathLoot2);
     }
+
+    // 🕒 STEP 1: Pehle 7 seconds tak BILKUL NO BLINK (Skoon se loot parhi rahegi)
+    Timer(const Duration(seconds: 7), () {
+      int pulseCount = 0;
+
+      // 🎯 STEP 2: Last 3 seconds mein (3000ms / 200ms = 15 pulses) blink engine start hoga
+      Timer.periodic(const Duration(milliseconds: 200), (blinkTimer) {
+        pulseCount++;
+
+        if (pulseCount >= 15) {
+          blinkTimer.cancel();
+
+          // Match end par bacha hua loot saaf karein
+          for (var lootItem in npcLootItems) {
+            if (foods.contains(lootItem)) {
+              _removeFood(lootItem);
+            }
+          }
+          isLootBlinkingState = false;
+          notifyListeners();
+          return;
+        }
+
+        // Sirf in aakhri 3 seconds mein state toggle hogi tick-tick kar ke
+        isLootBlinkingState = !isLootBlinkingState;
+        notifyListeners();
+      });
+    });
   }
 
   // --- Game Loop ---
@@ -209,9 +268,17 @@ class SnakeGameProvider with ChangeNotifier {
     if (isGameOver) return;
 
     // 1. BORDER CHECK
-    if (playerPos.dx < 0 || playerPos.dx > worldSize || playerPos.dy < 0 || playerPos.dy > worldSize) {
+    final double borderPadding = 60.0;
+
+    if (playerPos.dx < borderPadding || playerPos.dx > (worldSize - borderPadding) ||
+        playerPos.dy < borderPadding || playerPos.dy > (worldSize - borderPadding)) {
+
       if (isInvincible) {
-        playerPos = Offset(playerPos.dx.clamp(50.0, worldSize - 50.0), playerPos.dy.clamp(50.0, worldSize - 50.0));
+        // Invincible state mein saanp border ke andar safely clamp rahega
+        playerPos = Offset(
+            playerPos.dx.clamp(borderPadding + 10.0, worldSize - borderPadding - 10.0),
+            playerPos.dy.clamp(borderPadding + 10.0, worldSize - borderPadding - 10.0)
+        );
         playerBody[0] = playerPos;
       } else {
         _handleSnakeDeath(playerBody, activeSkinColors);
@@ -291,7 +358,8 @@ class SnakeGameProvider with ChangeNotifier {
     for (var npc in npcs) {
       bool npcDied = false;
 
-      if (npc.pos.dx < 5 || npc.pos.dx > worldSize - 5 || npc.pos.dy < 5 || npc.pos.dy > worldSize - 5) {
+      if (npc.pos.dx < borderPadding || npc.pos.dx > worldSize - borderPadding ||
+          npc.pos.dy < borderPadding || npc.pos.dy > worldSize - borderPadding) {
         npcDied = true;
       }
 
@@ -352,8 +420,12 @@ class SnakeGameProvider with ChangeNotifier {
     while (diff > pi) diff -= 2 * pi;
 
     playerAngle += diff * (11.0 * agility * dt);
-    double speedMultiplier = 1.0 - (playerBody.length / 4000).clamp(0.0, 0.35);
-    double moveSpeed = (isBoosting ? 390.0 : 220.0) * speedMultiplier;
+
+    // 🎯 FIX: Speed Drop Mechanism Smooth Kar Diya
+    // Pehle max 35% speed drop ho rahi thi aur factor tezi se gir raha tha.
+    // Ab base speed ka structure thora tweak kiya hy taake bada saanp decent speed maintain kare.
+    double speedMultiplier = 1.0 - (playerBody.length / 6000).clamp(0.0, 0.20); // Max 20% drop hoga, 35% nahi
+    double moveSpeed = (isBoosting ? 400.0 : 240.0) * speedMultiplier; // Base speed thori barha di hy balance ke liye
 
     playerPos += Offset(cos(playerAngle) * moveSpeed * dt, sin(playerAngle) * moveSpeed * dt);
 
@@ -446,8 +518,11 @@ class SnakeGameProvider with ChangeNotifier {
     }
 
     double efficiency = 1.0 / (1.0 + (playerBody.length / 600));
-    double baseGrowth = f.isLoot ? 1.0 : 0.4;
-    double growth = baseGrowth * 0.70 * efficiency;
+
+    // 🎯 FIX: 3:1 Ratio for Trial Loot Growth
+    // Agar loot hy to base growth 0.334 rakhi hy, taake exact 3 loot par 1 segment barhay (0.334 * 3 = 1.002 -> 1)
+    double baseGrowth = f.isLoot ? 0.334 : 0.20;
+    double growth = baseGrowth * efficiency;
 
     fractionalLength += growth;
     currentLengthLimit = fractionalLength.toInt();

@@ -45,7 +45,7 @@ class _SnakeIOGameState extends State<SnakeIOGame> {
   @override
   void initState() {
     super.initState();
-    _hasProcessedGameOver = false; // Reset flag on start
+    _hasProcessedGameOver = false;
 
     WidgetsBinding.instance.addPostFrameCallback((_) {
       final user = Provider.of<UserProvider>(context, listen: false);
@@ -63,7 +63,6 @@ class _SnakeIOGameState extends State<SnakeIOGame> {
       Provider.of<SnakeGameProvider>(context, listen: false).startGame(
         skin.bodyColors,
         onLiveTicketsRewarded: (tickets, message) {
-          // Live gameplay ke dauran milestones hit hone par tickets sath sath add honge
           user.addFreeTickets(tickets);
           debugPrint("🎯 [LIVE REWARD]: $message");
         },
@@ -96,13 +95,13 @@ class _SnakeIOGameState extends State<SnakeIOGame> {
     );
   }
 
+  // ✅ FIXED: Exit game engine ko completely destroy karega taake background loop dead ho jaye
   void _exitGame() {
     final adProvider = Provider.of<AdProvider>(context, listen: false);
     final game = Provider.of<SnakeGameProvider>(context, listen: false);
 
-    game.gameTimer?.cancel();
-    game.isGameOver = false;
-    game.isPaused = false;
+    // 🎯 CHAWAL FIXED: Pehle loop timer cancel nahi ho raha tha, ab stop function call kiya hy
+    game.stopGameEngine();
 
     adProvider.showInterstitialAd();
 
@@ -111,17 +110,31 @@ class _SnakeIOGameState extends State<SnakeIOGame> {
     }
   }
 
+  // ✅ FIXED: Lose life logic bina kisi random glitch ke clean tareeqay se life minus karegi aur game reset karegi
   void _loseLife() {
     final game = Provider.of<SnakeGameProvider>(context, listen: false);
     final lifeProv = Provider.of<LifeProvider>(context, listen: false);
 
     if (lifeProv.lives > 0) {
+      lifeProv.consumeLife();
+
       setState(() {
         _hasProcessedGameOver = false; // Reset guard for next life/try
       });
-      lifeProv.consumeLife();
-      game.resetGame();
+
+      // Fir se fresh screen active karne ke liye skin read karenge
+      final user = Provider.of<UserProvider>(context, listen: false);
+      final skin = snakeSkins.firstWhere(
+            (s) => s.id == user.currentSkinId,
+        orElse: () => snakeSkins.first,
+      );
+
+      // Game ko safely dobara initialize karenge naye life par
+      game.startGame(skin.bodyColors, onLiveTicketsRewarded: (tickets, message) {
+        user.addFreeTickets(tickets);
+      });
     } else {
+      // Agar life zero hain to seedha menu par tapkao
       _exitGame();
     }
   }
@@ -138,15 +151,13 @@ class _SnakeIOGameState extends State<SnakeIOGame> {
 
     // 🎯 SECURE SINGLE-SHOT SCORE & TICKETS SUBMISSION
     if (game.isGameOver && !_hasProcessedGameOver) {
-      _hasProcessedGameOver = true; // Lock it immediately
+      _hasProcessedGameOver = true;
 
       WidgetsBinding.instance.addPostFrameCallback((_) {
         print("🏁 [GAME OVER DETECTED] Submitting Data Securely...");
 
-        // 1. Submit High Score (Exactly Once)
         user.updateHighScore(game.score);
 
-        // 2. Claim & Finalize Remaining Match End Tickets (Exactly Once)
         game.finalizeAndClaimRemainingTickets((remainingTickets) {
           user.addFreeTickets(remainingTickets);
           print("🎟️ [REWARDS SUBMITTED] +$remainingTickets Game-End Tickets Claimed!");
@@ -181,7 +192,7 @@ class _SnakeIOGameState extends State<SnakeIOGame> {
                 painter: SnakeGamePainter(
                   game.playerPos, game.playerAngle, game.playerBody,
                   game.foods, game.npcs, game.worldSize, skin, game.isInvincible,
-                  game.chunkedFoods, game.isBoosting,
+                  game.chunkedFoods, game.isBoosting, game.isLootBlinkingState,
                 ),
                 size: Size.infinite,
               ),
@@ -330,14 +341,8 @@ class _SnakeIOGameState extends State<SnakeIOGame> {
           if (game.isGameOver)
             GameOverOverlay(
               score: game.score,
-              onLoseLife: () {
-
-                final lifeProv = Provider.of<LifeProvider>(context, listen: false);
-                if (lifeProv.lives > 0) {
-                  lifeProv.consumeLife();
-                }
-                _exitGame();
-              },
+              onLoseLife: _loseLife,       // Yeh tab chalay ga jab sach mein life kaat kar naya game chalana ho (e.g. ad na dekhne par auto-flow ya revival)
+              onExitPressed: _exitGame,    // 🎯 FIX: Jab user "No Thanks, Exit" dbaaye ga, to direct _exitGame() chalay ga aur loop band ho kar screen pop ho jaye gi!
             ),
         ],
       ),
@@ -345,28 +350,24 @@ class _SnakeIOGameState extends State<SnakeIOGame> {
   }
 }
 
-// --- Sub-Widgets (Leaderboard, Minimap, Boost) ---
-
+// --- Sub-Widgets remain unchanged ---
 class _Leaderboard extends StatelessWidget {
   final SnakeGameProvider game;
   const _Leaderboard({required this.game});
 
   @override
   Widget build(BuildContext context) {
-    // Collect all players and NPCs
     List<Map<String, dynamic>> all = [
       {'name': 'YOU', 'score': game.currentLengthLimit, 'isP': true}
     ];
     for (var n in game.npcs) {
       all.add({'name': n.name, 'score': n.length, 'isP': false});
     }
-
-    // Sort by Length (Highest first)
     all.sort((a, b) => b['score'].compareTo(a['score']));
 
     return Container(
       padding: const EdgeInsets.all(10),
-      width: 150, // Fixed width for better look
+      width: 150,
       decoration: BoxDecoration(
           color: Colors.black.withOpacity(0.3),
           borderRadius: BorderRadius.circular(12),

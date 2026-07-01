@@ -7,9 +7,9 @@ class AdHelper {
 
   static bool get _useProductionAds => kReleaseMode && !_useTestAdsInRelease;
   // --- REAL IDS (Replace these with IDs from AdMob Console) ---
-  static const String _androidRealRewardedID = "ca-app-pub-7462766040867655/9302789889";
-  static const String _androidRealInterstitialID = "ca-app-pub-7462766040867655/5074707203";
-  static const String _androidRealAppOpenID = "ca-app-pub-7462766040867655/8574968517";
+  static const String _androidRealRewardedID = "ca-app-pub-2435287255767686/4897434577";
+  static const String _androidRealInterstitialID = "ca-app-pub-2435287255767686/3177158797";
+  static const String _androidRealAppOpenID = "ca-app-pub-2435287255767686/5883213185";
 
   // --- TEST IDS (Google's Official IDs) ---
   static const String _androidTestRewardedID = "ca-app-pub-3940256099942544/5224354917";

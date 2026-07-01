@@ -3,6 +3,7 @@ import 'dart:math';
 import 'dart:ui';
 import 'package:flutter/material.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
+import '../services/notification_services.dart';
 
 class SpinProvider with ChangeNotifier {
   final _storage = const FlutterSecureStorage();
@@ -46,15 +47,15 @@ class SpinProvider with ChangeNotifier {
       _canDailySpin = isNewDay;
     }
 
-    // --- THE FIX ---
     if (isNewDay) {
-      // If it's a new day, reset extra spins and clear cooldowns
       _extraSpinsAvailable = 10;
       _nextAdSpinTime = null;
       await _storage.write(key: 'extra_spins', value: '10');
       await _storage.delete(key: 'next_ad_spin_time');
+
+      // 🎯 Naya din shuru hote hi purana ad notification cancel karein aur naya Daily Reminder set karein
+      NotificationService().cancel(NotificationService.idSpinWheel);
     } else {
-      // If same day, load existing progress
       String? extra = await _storage.read(key: 'extra_spins');
       _extraSpinsAvailable = int.tryParse(extra ?? '10') ?? 10;
 
@@ -65,6 +66,9 @@ class SpinProvider with ChangeNotifier {
       }
     }
 
+    // 🎯 Jab bhi user app kholay, usay pending Spin notification show na ho kyunke woh active hy
+    NotificationService().cancel(NotificationService.idSpinWheel);
+
     notifyListeners();
   }
 
@@ -74,6 +78,9 @@ class SpinProvider with ChangeNotifier {
       if (_nextAdSpinTime != null && DateTime.now().isAfter(_nextAdSpinTime!)) {
         _nextAdSpinTime = null;
         _ticker?.cancel();
+
+        // Cooldown app ke andar hi khatam ho gaya, notification cancel kar dein
+        NotificationService().cancel(NotificationService.idSpinWheel);
       }
       notifyListeners();
     });
@@ -103,26 +110,31 @@ class SpinProvider with ChangeNotifier {
     _rotation = endAngle % (2 * pi);
     _isSpinning = false;
 
-    // The arrow is at the bottom (pi), so we calculate relative to that
     int numberOfSlices = rewards.length;
     double sectorAngle = (2 * pi) / numberOfSlices;
 
-    // Adjusted calculation to find what is at the pointer
     int winningIndex = (((2 * pi - _rotation) + (pi / 2)) % (2 * pi) / sectorAngle).floor();
     String result = rewards[winningIndex % numberOfSlices];
 
-    // 3. Save State
+    // 3. Save State & Setup Notifications
     if (isDaily) {
       _canDailySpin = false;
       await _storage.write(key: 'last_daily_spin', value: DateTime.now().toIso8601String());
+
+      // 🎯 Agle din (24 Hours baad) ke liye automatic Daily Reward Reminder schedule karein
+      NotificationService().scheduleDailyReward(const Duration(hours: 24));
     } else {
       _extraSpinsAvailable--;
       _nextAdSpinTime = DateTime.now().add(const Duration(minutes: 4));
       await _storage.write(key: 'extra_spins', value: _extraSpinsAvailable.toString());
+
+      // 🎯 4 Minutes ke exact cooldown ke baad automatic dynamic message send hoga!
+      NotificationService().scheduleSpinWheel(const Duration(minutes: 4));
+
       _startCooldownTimer();
     }
 
     notifyListeners();
-    return result; // Return the winning string
+    return result;
   }
 }

@@ -15,8 +15,9 @@ class SnakeGamePainter extends CustomPainter {
   final Map<String, List<Food>> chunkedFoods;
   final double chunkSize = 500.0;
   bool isBoosting;
+  final bool isLootBlinkingState;
 
-  SnakeGamePainter(this.playerPos, this.playerAngle, this.playerBody, this.foods, this.npcs, this.worldSize, this.activeSkin, this.isInvincible, this.chunkedFoods, this.isBoosting);
+  SnakeGamePainter(this.playerPos, this.playerAngle, this.playerBody, this.foods, this.npcs, this.worldSize, this.activeSkin, this.isInvincible, this.chunkedFoods, this.isBoosting, this.isLootBlinkingState);
 
   @override
   void paint(Canvas canvas, Size size) {
@@ -49,10 +50,23 @@ class SnakeGamePainter extends CustomPainter {
       name: "YOU", eyeColor: activeSkin.eyeColor, showShield: isInvincible,
     );
 
+    // 🎯 FIX: 120px Solid Glowing Border Matrix (Saanp ko bachaane aur boundary highlight karne ke liye)
+    final borderPaint = Paint()
+      ..color = const Color(0xFFFF0055) // 🔥 Ultra-Solid Neon Red/Pink (Ek dum khatarnak aur saaf nazar aane wala color)
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = 120.0
+      ..strokeCap = StrokeCap.square; // Grid corners ko perfect corner banane ke liye square cap
+
+    // 🌍 WORLD SIZE KA RECTANGLE (Border Draw karne ke liye)
+    final Rect worldBounds = Rect.fromLTWH(0, 0, worldSize, worldSize);
+
+    // 🖌️ CANVAS PAR MAIN SOLID BORDER DRAW KAREIN
+    canvas.drawRect(worldBounds, borderPaint);
+
     // -----------------------------------------------------------------
     // 👑 RE-INJECTED: TOP 3 CROWNS & OFF-SCREEN RADAR ENGINE (SCREEN SPACE)
     // -----------------------------------------------------------------
-    canvas.restore(); // Yeh aap ke code mein pehle se majood hy
+    canvas.restore();
 
     // 1. Saare snakes ki current length aur positions ki list banayein
     List<Map<String, dynamic>> leaderList = [
@@ -139,7 +153,6 @@ class SnakeGamePainter extends CustomPainter {
     double w = 20.0; // Crown Width
     double h = 12.0; // Crown Height
 
-    // Precise 3-pointed crown geometric formula
     path.moveTo(center.dx - w / 2, center.dy + h / 2);
     path.lineTo(center.dx - w / 2, center.dy - h / 4);
     path.lineTo(center.dx - w / 3, center.dy - h / 2); // Left peak
@@ -149,24 +162,21 @@ class SnakeGamePainter extends CustomPainter {
     path.lineTo(center.dx + w / 2, center.dy + h / 2);
     path.close();
 
-    // 1. 🛑 FIXED: Draw Shadow first using Flutter's MaskFilter (Like your snake body)
     final shadowPaint = Paint()
       ..color = color.withOpacity(0.35)
       ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 4);
 
     canvas.save();
-    canvas.translate(0, 2); // Shadow ko thoda sa neeche shift karne ke liye
+    canvas.translate(0, 2);
     canvas.drawPath(path, shadowPaint);
     canvas.restore();
 
-    // 2. Draw Main Solid Crown
     final paint = Paint()
       ..color = color
       ..style = PaintingStyle.fill;
 
     canvas.drawPath(path, paint);
 
-    // Crown Base Line Darkening
     final basePaint = Paint()
       ..color = Colors.black26
       ..style = PaintingStyle.stroke
@@ -180,11 +190,9 @@ class SnakeGamePainter extends CustomPainter {
 
   // --- HELPER PATH: RENDER BORDER ARROW + MINI CROWN ---
   void _paintEdgeRadar(Canvas canvas, Offset edgePos, double angle, Color color) {
-    // 1. Outer Dark Circular Node
     canvas.drawCircle(edgePos, 16, Paint()..color = const Color(0xFF161616)..style = PaintingStyle.fill);
     canvas.drawCircle(edgePos, 16, Paint()..color = color.withOpacity(0.7)..style = PaintingStyle.stroke..strokeWidth = 1.5);
 
-    // 2. Rotating Pointer Arrow
     canvas.save();
     canvas.translate(edgePos.dx, edgePos.dy);
     canvas.rotate(angle);
@@ -199,7 +207,6 @@ class SnakeGamePainter extends CustomPainter {
     canvas.drawPath(arrowPath, Paint()..color = color..style = PaintingStyle.fill);
     canvas.restore();
 
-    // 3. Attach Mini-Crown over the radar node
     _paintCrownOnly(canvas, edgePos + const Offset(0, -1), color);
   }
 
@@ -207,7 +214,6 @@ class SnakeGamePainter extends CustomPainter {
     double screenW = size.width / zoom;
     double screenH = size.height / zoom;
 
-    // Determine which chunks are visible on screen
     int startX = ((playerPos.dx - screenW / 2) / chunkSize).floor();
     int endX = ((playerPos.dx + screenW / 2) / chunkSize).floor();
     int startY = ((playerPos.dy - screenH / 2) / chunkSize).floor();
@@ -220,27 +226,30 @@ class SnakeGamePainter extends CustomPainter {
         List<Food>? chunk = chunkedFoods["$x,$y"];
         if (chunk != null) {
           for (var f in chunk) {
-            // FIXED: Ensure radius uses the 'type' field from your model
-            // 0 = small, 1 = medium, loot = large
             double radius = f.isLoot ? 10.0 : (f.type == 0 ? 3.5 : 6.0);
 
-            // Draw Glow for Loot (Dead snakes or Boost trails)
+            Color calculatedColor = f.color;
+            if (f.isLoot && isLootBlinkingState) {
+              calculatedColor = f.color.withOpacity(0.15);
+            }
+
             if (f.isLoot) {
               canvas.drawCircle(
                   f.pos,
-                  radius * 1.8,
-                  Paint()..color = f.color.withOpacity(0.2)..maskFilter = const MaskFilter.blur(BlurStyle.normal, 3)
+                  radius * 1.2,
+                  Paint()
+                    ..color = calculatedColor.withOpacity(1.0) // 🌟 Glow Opacity halki kar di
+                    ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 0.5) // 🌟 Blur radius set kar diya
               );
             }
 
-            paint.color = f.color;
+            paint.color = calculatedColor;
             canvas.drawCircle(f.pos, radius, paint);
 
-            // Small Shine detail (makes it look like a bubble/pearl)
             canvas.drawCircle(
                 f.pos - Offset(radius * 0.3, radius * 0.3),
                 radius * 0.25,
-                Paint()..color = Colors.white.withOpacity(0.6)
+                Paint()..color = Colors.white.withOpacity(f.isLoot && isLootBlinkingState ? 0.15 : 0.6)
             );
           }
         }
@@ -265,8 +274,7 @@ class SnakeGamePainter extends CustomPainter {
       canvas.drawLine(Offset(left, i), Offset(right, i), gridPaint);
     }
 
-    // World Border
-    canvas.drawRect(Rect.fromLTWH(0, 0, worldSize, worldSize), Paint()..color = Colors.red.withOpacity(0.1)..style = PaintingStyle.stroke..strokeWidth = 20);
+    // 🎯 CHAWAL FIXED: Pehle yahan nichay purana extra 20px black/red line draw ho raha tha jo map limits kharab kar raha tha, ab hum ne use saaf kar diya hy kyun ke upar perfect 120px solid boundary render ho rahi hy.
   }
 
   void _drawSnake(Canvas canvas, List<Offset> body, double angle, List<Color> colors, {String? name, Color eyeColor = Colors.white, bool showShield = false, NPCSize? npcSize}) {
@@ -278,20 +286,17 @@ class SnakeGamePainter extends CustomPainter {
       bodyRadius *= (npcSize == NPCSize.small ? 0.8 : npcSize == NPCSize.xlarge ? 1.3 : 1.0);
     }
 
-    // Draw Shadows (Very sparse for performance)
     Paint shadowPaint = Paint()..color = Colors.black26..maskFilter = const MaskFilter.blur(BlurStyle.normal, 4);
     for (int i = body.length - 1; i >= 0; i -= 15) {
       canvas.drawCircle(body[i] + const Offset(4, 4), bodyRadius, shadowPaint);
     }
 
-    // Draw Body
     final bodyPaint = Paint()..isAntiAlias = true;
     for (int i = body.length - 1; i >= 0; i--) {
       bodyPaint.color = colors[(i ~/ 4) % colors.length];
       canvas.drawCircle(body[i], bodyRadius, bodyPaint);
     }
 
-    // Draw Head
     _drawHead(canvas, headPos, angle, bodyRadius, colors[1], eyeColor);
 
     if (showShield) _drawShield(canvas, headPos, bodyRadius);

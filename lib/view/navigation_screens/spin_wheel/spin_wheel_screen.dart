@@ -19,6 +19,7 @@ class SpinWheelScreen extends StatefulWidget {
 class _SpinWheelScreenState extends State<SpinWheelScreen> with SingleTickerProviderStateMixin {
 
   late AnimationController _controller;
+  bool _adRewardEarned = false; // 🎯 Tracking context for the ad spin trigger
 
   final List<String> rewards = [
     "50 COINS",    // 0
@@ -90,13 +91,8 @@ class _SpinWheelScreenState extends State<SpinWheelScreen> with SingleTickerProv
   // --- 4. SUB-WIDGETS ---
   Widget _buildControlPanel(SpinProvider prov) {
     final adProv = Provider.of<AdProvider>(context);
-
     int seconds = adProv.secondsRemaining;
-
-    // An ad is ready only if we have one cached, haven't hit the daily limit, and cooldown is 0
     bool adReady = adProv.isRewardedReady && seconds == 0;
-
-    // CRITICAL GUARD: Check if the system is currently processing a load network call
     bool isCurrentlyFetching = adProv.isAdLoading;
 
     return ClipRRect(
@@ -118,24 +114,38 @@ class _SpinWheelScreenState extends State<SpinWheelScreen> with SingleTickerProv
                 }, AppConstants.deepPurpleColor)
 
               else if (prov.extraSpinsAvailable > 0)
-                _actionButton(
+              // 🎯 NESTED CONDITION FOR AD COMPLETION BUTTON STATE
+                _adRewardEarned
+                    ? _actionButton(
+                  prov,
+                  "TAP TO SPIN! ⚡",
+                      () async {
+                    // Reset the flag first so button locks instantly
+                    setState(() { _adRewardEarned = false; });
+
+                    // Now fire the actual rotation system safely
+                    String? result = await prov.spin(_controller, rewards, false);
+                    if (result != null) _handleReward(result);
+                  },
+                  Colors.greenAccent, // Green highlight when ready to manually spin
+                )
+                    : _actionButton(
                   prov,
                   seconds > 0
                       ? "NEXT AD IN ${seconds}s"
-                      : (adReady
-                      ? "WATCH AD TO SPIN"
-                      : "LOADING AD..."),
+                      : (adReady ? "WATCH AD TO SPIN" : "LOADING AD..."),
                       () async {
                     await adProv.showRewardedAd(
-                      onUserEarnedReward: (ad, reward) async {
-                        String? result = await prov.spin(_controller, rewards, false);
-                        if (result != null) _handleReward(result);
+                      onUserEarnedReward: (ad, reward) {
+                        // 🛑 COOLDOWN FIX: Ad complete hote hi spin nahi chalega!
+                        // Sirf state set hogi jo "TAP TO SPIN" button samne layegi.
+                        setState(() {
+                          _adRewardEarned = true;
+                        });
                       },
                     );
                   },
                   adReady ? Colors.orangeAccent : Colors.grey,
-                  // FIXED: Disable the button immediately if a cooldown is active,
-                  // if an ad is not ready, OR if it's currently fetching in the background.
                   isTimerActive: seconds > 0 || !adReady || isCurrentlyFetching,
                 )
               else

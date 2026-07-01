@@ -1,5 +1,7 @@
 import 'dart:async';
+import 'package:connectivity_plus/connectivity_plus.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import '../auth/auth_wrapper.dart';
 import '../core/constants.dart';
 import '../core/painters/logo_painter.dart';
@@ -12,86 +14,193 @@ class SplashScreen extends StatefulWidget {
   State<SplashScreen> createState() => _SplashScreenState();
 }
 
-class _SplashScreenState extends State<SplashScreen> {
+class _SplashScreenState extends State<SplashScreen> with SingleTickerProviderStateMixin {
   double _progress = 0.0;
   bool _isConfigLoaded = false;
+  bool _isNetworkChecked = false;
   Map<String, dynamic>? _updateData;
   Timer? _loadingTimer;
+
+  late AnimationController _pulseController;
+  late Animation<double> _pulseAnimation;
 
   @override
   void initState() {
     super.initState();
-    _startGameLoading();
+
+    // 🎨 LOGO ANIMATION (Breathe Effect)
+    _pulseController = AnimationController(
+      vsync: this,
+      duration: const Duration(seconds: 1),
+    )..repeat(reverse: true);
+
+    _pulseAnimation = Tween<double>(begin: 0.95, end: 1.05).animate(
+      CurvedAnimation(parent: _pulseController, curve: Curves.easeInOut),
+    );
+
+    _startPremiumLoading();
   }
 
   @override
   void dispose() {
     _loadingTimer?.cancel();
+    _pulseController.dispose();
     super.dispose();
   }
 
-  void _startGameLoading() {
-    _fetchServerConfig();
+  void _startPremiumLoading() {
+    // Background mein chup-chaap internet aur config check shuru kar do
+    _checkConnectivityAndConfig();
 
-    // Smooth increment (Takes around 3.5 to 4 seconds)
-    const double incrementAmount = 0.0075;
-
+    // Smoothly progress bar barhao (30ms ke ticks par)
     _loadingTimer = Timer.periodic(const Duration(milliseconds: 30), (timer) {
       if (!mounted) return;
 
       setState(() {
-        if (_progress < 0.99) {
-          _progress += incrementAmount;
-        } else if (_isConfigLoaded) {
-          _progress = 1.0;
-          _loadingTimer?.cancel();
-          _navigateAfterLoading();
+        if (_progress < 0.82) {
+          // 80% tak smoothly barhega bina ruke
+          _progress += 0.0095;
+        } else if (_isConfigLoaded && _isNetworkChecked) {
+          // Jaise hi data load ho jaye, bar ko 100% par phek do ek dum se fast!
+          if (_progress < 1.0) {
+            _progress += 0.04; // Fast boost to 100%
+          } else {
+            _loadingTimer?.cancel();
+            _navigateAfterLoading();
+          }
         }
       });
     });
   }
 
-  Future<void> _fetchServerConfig() async {
-    try {
-      _updateData = await AppConfigService.instance.getUpdateStatus();
-    } catch (e) {
-      debugPrint("🚀 [SPLASH UI LOG] Config fetch failed, bypassing: $e");
-      _updateData = {'isRequired': false};
-    } finally {
-      _isConfigLoaded = true;
+  Future<void> _checkConnectivityAndConfig() async {
+    var connectivityResult = await (Connectivity().checkConnectivity());
+
+    if (connectivityResult.contains(ConnectivityResult.none)) {
+      _loadingTimer?.cancel();
+      _showNoInternetDialog();
+    } else {
+      _isNetworkChecked = true;
+      // Server se details le aao
+      try {
+        _updateData = await AppConfigService.instance.getUpdateStatus();
+      } catch (e) {
+        debugPrint("🚀 [SPLASH] Config bypass: $e");
+        _updateData = {'isRequired': false};
+      } finally {
+        _isConfigLoaded = true; // Timer ko green signal de do
+      }
     }
   }
 
   void _navigateAfterLoading() {
     if (!mounted) return;
 
-    print("🚀 [SPLASH UI LOG] _navigateAfterLoading triggered!");
-
     if (_updateData != null && _updateData!['isRequired'] == true) {
-      print("🎯 [SPLASH UI LOG] Update Required! Showing custom dialog...");
       _showUpdateDialog(
           context,
           _updateData!['currentVersion'] ?? '1.0.0',
           _updateData!['minVersion'] ?? '1.0.0'
       );
     } else {
-      print("➡️ [SPLASH UI LOG] No update needed, passing control to AuthWrapper...");
       Navigator.of(context).pushReplacement(
           MaterialPageRoute(builder: (_) => const AuthWrapper())
       );
     }
   }
 
+  // 🚫 NO INTERNET GAMING DIALOG
+  void _showNoInternetDialog() {
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (ctx) {
+        return WillPopScope(
+          onWillPop: () async => false,
+          child: Dialog(
+            backgroundColor: const Color(0xFF1E293B),
+            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(24)),
+            child: Padding(
+              padding: const EdgeInsets.all(24.0),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Container(
+                    padding: const EdgeInsets.all(16),
+                    decoration: BoxDecoration(
+                      color: Colors.redAccent.withOpacity(0.1),
+                      shape: BoxShape.circle,
+                      border: Border.all(color: Colors.redAccent.withOpacity(0.3), width: 2),
+                    ),
+                    child: const Icon(Icons.wifi_off_rounded, size: 40, color: Colors.redAccent),
+                  ),
+                  const SizedBox(height: 20),
+                  const Text(
+                    "CONNECTION ERROR",
+                    style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold, letterSpacing: 1.5, color: Colors.white),
+                  ),
+                  const SizedBox(height: 12),
+                  Text(
+                    "Snakes Era requires an active internet connection to sync data and load arena. Please check your network.",
+                    textAlign: TextAlign.center,
+                    style: TextStyle(color: Colors.white.withOpacity(0.6), fontSize: 13, height: 1.4),
+                  ),
+                  const SizedBox(height: 24),
+                  Row(
+                    children: [
+                      Expanded(
+                        child: OutlinedButton(
+                          style: OutlinedButton.styleFrom(
+                            side: BorderSide(color: Colors.white.withOpacity(0.1)),
+                            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+                            padding: const EdgeInsets.symmetric(vertical: 14),
+                          ),
+                          onPressed: () => SystemNavigator.pop(),
+                          child: Text("EXIT", style: TextStyle(color: Colors.white.withOpacity(0.6))),
+                        ),
+                      ),
+                      const SizedBox(width: 12),
+                      Expanded(
+                        child: ElevatedButton(
+                          style: ElevatedButton.styleFrom(
+                            backgroundColor: AppConstants.primaryColor,
+                            foregroundColor: Colors.white,
+                            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+                            padding: const EdgeInsets.symmetric(vertical: 14),
+                          ),
+                          onPressed: () {
+                            Navigator.pop(ctx);
+                            setState(() {
+                              _progress = 0.0;
+                              _isConfigLoaded = false;
+                              _isNetworkChecked = false;
+                            });
+                            _startPremiumLoading(); // Retry everything
+                          },
+                          child: const Text("RETRY", style: TextStyle(fontWeight: FontWeight.bold)),
+                        ),
+                      ),
+                    ],
+                  )
+                ],
+              ),
+            ),
+          ),
+        );
+      },
+    );
+  }
+
   // 🎨 BEAUTIFIED GAMING UPDATE DIALOG
   void _showUpdateDialog(BuildContext context, String current, String min) {
     showDialog(
       context: context,
-      barrierDismissible: false, // User dismiss nahi kar sakta (Force Update)
+      barrierDismissible: false,
       builder: (ctx) {
         return WillPopScope(
-          onWillPop: () async => false, // Android back button block
+          onWillPop: () async => false,
           child: Dialog(
-            backgroundColor: const Color(0xFF1E293B), // Premium Dark Slate
+            backgroundColor: const Color(0xFF1E293B),
             shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(24)),
             elevation: 10,
             child: Padding(
@@ -99,7 +208,6 @@ class _SplashScreenState extends State<SplashScreen> {
               child: Column(
                 mainAxisSize: MainAxisSize.min,
                 children: [
-                  // Glowing Update Icon/Badge
                   Container(
                     padding: const EdgeInsets.all(16),
                     decoration: BoxDecoration(
@@ -107,39 +215,20 @@ class _SplashScreenState extends State<SplashScreen> {
                       shape: BoxShape.circle,
                       border: Border.all(color: AppConstants.primaryColor.withOpacity(0.3), width: 2),
                     ),
-                    child: const Icon(
-                        Icons.system_update_rounded,
-                        size: 40,
-                        color: AppConstants.primaryColor
-                    ),
+                    child: const Icon(Icons.system_update_rounded, size: 40, color: AppConstants.primaryColor),
                   ),
                   const SizedBox(height: 20),
-
-                  // Title
                   const Text(
                     "UPDATE REQUIRED",
-                    style: TextStyle(
-                      fontSize: 20,
-                      fontWeight: FontWeight.bold,
-                      letterSpacing: 1.5,
-                      color: Colors.white,
-                    ),
+                    style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold, letterSpacing: 1.5, color: Colors.white),
                   ),
                   const SizedBox(height: 12),
-
-                  // Description text
                   Text(
                     "A new version of Snakes Era is available. Please update to the latest version to enjoy uninterrupted gameplay.",
                     textAlign: TextAlign.center,
-                    style: TextStyle(
-                      color: Colors.white.withOpacity(0.6),
-                      fontSize: 14,
-                      height: 1.4,
-                    ),
+                    style: TextStyle(color: Colors.white.withOpacity(0.6), fontSize: 14, height: 1.4),
                   ),
                   const SizedBox(height: 20),
-
-                  // Version Badges Container
                   Container(
                     padding: const EdgeInsets.symmetric(vertical: 10, horizontal: 16),
                     decoration: BoxDecoration(
@@ -156,8 +245,6 @@ class _SplashScreenState extends State<SplashScreen> {
                     ),
                   ),
                   const SizedBox(height: 24),
-
-                  // Action Button
                   SizedBox(
                     width: double.infinity,
                     height: 50,
@@ -170,14 +257,7 @@ class _SplashScreenState extends State<SplashScreen> {
                         shadowColor: AppConstants.primaryColor.withOpacity(0.4),
                       ),
                       onPressed: () => AppConfigService.instance.launchStore(),
-                      child: const Text(
-                        "UPDATE NOW",
-                        style: TextStyle(
-                          fontSize: 16,
-                          fontWeight: FontWeight.bold,
-                          letterSpacing: 1,
-                        ),
-                      ),
+                      child: const Text("UPDATE NOW", style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, letterSpacing: 1)),
                     ),
                   ),
                 ],
@@ -192,21 +272,16 @@ class _SplashScreenState extends State<SplashScreen> {
   Widget _buildVersionInfo(String label, String version) {
     return Column(
       children: [
-        Text(
-          label.toUpperCase(),
-          style: TextStyle(color: Colors.white.withOpacity(0.3), fontSize: 9, fontWeight: FontWeight.bold),
-        ),
+        Text(label.toUpperCase(), style: TextStyle(color: Colors.white.withOpacity(0.3), fontSize: 9, fontWeight: FontWeight.bold)),
         const SizedBox(height: 4),
-        Text(
-          version,
-          style: const TextStyle(color: Colors.cyanAccent, fontSize: 14, fontWeight: FontWeight.bold),
-        ),
+        Text(version, style: const TextStyle(color: Colors.cyanAccent, fontSize: 14, fontWeight: FontWeight.bold)),
       ],
     );
   }
 
   @override
   Widget build(BuildContext context) {
+    // 🎯 Percentage calculation (0 se 100 tak clamp kiya hua)
     final int percentage = (_progress * 100).clamp(0, 100).toInt();
 
     return Scaffold(
@@ -217,24 +292,25 @@ class _SplashScreenState extends State<SplashScreen> {
             child: Column(
               mainAxisSize: MainAxisSize.min,
               children: [
-                SizedBox(
-                  width: 150,
-                  height: 150,
-                  child: CustomPaint(painter: AppLogoPainter()),
+                ScaleTransition(
+                  scale: _pulseAnimation,
+                  child: SizedBox(
+                    width: 150,
+                    height: 150,
+                    child: CustomPaint(painter: AppLogoPainter()),
+                  ),
                 ),
                 const SizedBox(height: 24),
                 Text(
                   AppConstants.appName.toUpperCase(),
-                  style: const TextStyle(
-                    fontSize: 28,
-                    fontWeight: FontWeight.bold,
-                    letterSpacing: 6,
-                    color: AppConstants.primaryColor,
-                  ),
+                  style: const TextStyle(fontSize: 28, fontWeight: FontWeight.bold, letterSpacing: 6, color: AppConstants.primaryColor),
                 ),
               ],
             ),
           ),
+
+          // 🔥 NEON PROGRESS ENGINE (0% TO 100%)
+          // 🔥 THICK NEON PROGRESS ENGINE (LEFT TO RIGHT)
           Positioned(
             bottom: 60,
             left: 40,
@@ -245,52 +321,54 @@ class _SplashScreenState extends State<SplashScreen> {
                   mainAxisAlignment: MainAxisAlignment.spaceBetween,
                   children: [
                     Text(
-                      "INITIALIZING GAME ENGINE...",
+                      _progress < 0.82 ? "CONNECTING TO ARENA SERVER..." : "COMPLETING AUTHENTICATION...",
                       style: TextStyle(
-                        color: Colors.white.withOpacity(0.4),
-                        fontSize: 10,
-                        fontWeight: FontWeight.bold,
-                        letterSpacing: 1.5,
+                          color: Colors.white.withOpacity(0.4),
+                          fontSize: 10,
+                          fontWeight: FontWeight.bold,
+                          letterSpacing: 1.5
                       ),
                     ),
                     Text(
                       "$percentage%",
                       style: const TextStyle(
-                        color: AppConstants.primaryColor,
-                        fontSize: 12,
-                        fontWeight: FontWeight.w900,
+                          color: AppConstants.primaryColor,
+                          fontSize: 14, // Text thora bara kiya hy thick bar ke sath match karne ke liye
+                          fontWeight: FontWeight.w900
                       ),
                     ),
                   ],
                 ),
                 const SizedBox(height: 12),
+                // Outer Track Container
                 Container(
-                  height: 14,
+                  height: 22, // Thick gaming look
+                  width: double.infinity, // Poori width track set karne k liye
                   decoration: BoxDecoration(
                     color: Colors.white.withOpacity(0.05),
-                    borderRadius: BorderRadius.circular(12),
+                    borderRadius: BorderRadius.circular(30),
                     border: Border.all(color: Colors.white.withOpacity(0.1), width: 1.5),
                   ),
-                  child: Stack(
-                    children: [
-                      FractionallySizedBox(
-                        widthFactor: _progress,
-                        child: Container(
-                          decoration: BoxDecoration(
-                            borderRadius: BorderRadius.circular(12),
-                            gradient: const LinearGradient(
-                              colors: [AppConstants.primaryColor, Colors.cyanAccent],
-                            ),
-                            boxShadow: [
-                              BoxShadow(
-                                color: AppConstants.primaryColor.withOpacity(0.6),
-                                blurRadius: 8,
-                              )
-                            ],
+                  child: Align(
+                    alignment: Alignment.centerLeft, // 🎯 Yeh progress ko sirf LEFT se RIGHT chalaaye ga
+                    child: FractionallySizedBox(
+                      widthFactor: _progress.clamp(0.0, 1.0),
+                      child: Container(
+                        decoration: BoxDecoration(
+                          borderRadius: BorderRadius.circular(30),
+                          gradient: const LinearGradient(
+                            colors: [AppConstants.primaryColor, Colors.cyanAccent],
                           ),
+                          boxShadow: [
+                            BoxShadow(
+                              color: AppConstants.primaryColor.withOpacity(0.6),
+                              blurRadius: 10,
+                              spreadRadius: 1,
+                            )
+                          ],
                         ),
                       ),
-                    ],
+                    ),
                   ),
                 ),
               ],

@@ -8,11 +8,13 @@ import '../../../provider/ads_provider.dart';
 class GameOverOverlay extends StatefulWidget {
   final int score;
   final VoidCallback onLoseLife;
+  final VoidCallback onExitPressed;
 
   const GameOverOverlay({
     super.key,
     required this.score,
     required this.onLoseLife,
+    required this.onExitPressed,
   });
 
   @override
@@ -37,14 +39,14 @@ class _GameOverOverlayState extends State<GameOverOverlay> {
       final gameProvider = Provider.of<SnakeGameProvider>(context, listen: false);
       final user = Provider.of<UserProvider>(context, listen: false);
 
-      // 🌟 STEP 1: Pehle TICKETS CLAIM KAREIN (Bina kisi delay ke, taake state 0 na ho)
+      // 🎯 FIXED: Ticket calculation logic 50% kam (100 score par 1 ticket).
+      // Agar backend par handle nahi to yahan claim filter strictly pass hoga.
       gameProvider.finalizeAndClaimRemainingTickets((remainingTickets) async {
         if (remainingTickets > 0) {
-          await user.addFreeTickets(remainingTickets); // Safely added to total balance
+          await user.addFreeTickets(remainingTickets);
         }
       });
 
-      // 🌟 STEP 2: High Score baad mein update karein kyunki yeh internet par time leta hy
       await user.updateHighScore(gameProvider.score);
     });
   }
@@ -55,9 +57,13 @@ class _GameOverOverlayState extends State<GameOverOverlay> {
     final user = Provider.of<UserProvider>(context, listen: false);
     final adProv = Provider.of<AdProvider>(context);
 
+    // 🎯 SAFETY CHECK: Agar game over nahi hy to dabba gayab ho jaye
+    if (!gameProvider.isGameOver) {
+      return const SizedBox.shrink();
+    }
+
     final bool canRevive = gameProvider.adsWatchedThisSession < gameProvider.maxAdsPerSession;
     final isNewBest = widget.score > user.highScore;
-
     final randomCompliment = compliments[min(widget.score ~/ 10, compliments.length - 1)];
 
     bool adIsReady = adProv.isRewardedReady;
@@ -89,7 +95,7 @@ class _GameOverOverlayState extends State<GameOverOverlay> {
                 ),
               ),
 
-              // --- 2X SCORE SECTION WITH AD VALIDATION ---
+              // --- 2X SCORE SECTION ---
               if (!gameProvider.isScoreDoubled)
                 Container(
                   margin: const EdgeInsets.only(top: 10),
@@ -103,16 +109,8 @@ class _GameOverOverlayState extends State<GameOverOverlay> {
                       gameProvider.isPaused = true;
                       await adProv.showRewardedAd(
                         onUserEarnedReward: (ad, rewardItem) async {
+                          // ✅ FIXED: Sirf score double hoga, TICKETS DOUBLE NAHI HONGI (Claim functional call completely removed)
                           gameProvider.doubleScore();
-
-                          // 🌟 STEP 1: Pehle double score wale mazeed tickets claim karein instantly
-                          gameProvider.finalizeAndClaimRemainingTickets((doubleRemainingTickets) async {
-                            if (doubleRemainingTickets > 0) {
-                              await user.addFreeTickets(doubleRemainingTickets);
-                            }
-                          });
-
-                          // 🌟 STEP 2: High score baad mein update karein
                           await user.updateHighScore(gameProvider.score);
                         },
                       );
@@ -175,7 +173,7 @@ class _GameOverOverlayState extends State<GameOverOverlay> {
 
               const SizedBox(height: 20),
 
-              // --- REVIVE BUTTON WITH AD VALIDATION ---
+              // --- REVIVE BUTTON ---
               if (canRevive)
                 Column(
                   children: [
@@ -183,16 +181,20 @@ class _GameOverOverlayState extends State<GameOverOverlay> {
                       width: 260,
                       height: 52,
                       child: ElevatedButton.icon(
-                        onPressed: (canClickActions && canRevive)
+                        onPressed: (adIsReady && !isAdLoading && adCooldown == 0)
                             ? () async {
                           gameProvider.isPaused = true;
+
                           await adProv.showRewardedAd(
                             onUserEarnedReward: (ad, rewardItem) {
                               gameProvider.adsWatchedThisSession++;
                               gameProvider.revivePlayer();
                             },
                           );
-                          gameProvider.isPaused = false;
+
+                          if (!gameProvider.isGameOver) {
+                            gameProvider.isPaused = false;
+                          }
                         }
                             : null,
                         icon: isAdLoading
@@ -224,12 +226,12 @@ class _GameOverOverlayState extends State<GameOverOverlay> {
               TextButton(
                 onPressed: () async {
                   try {
-                    // Yahan widget.score use hoga kyunki hum StatefulWidget mein hain
                     await user.updateHighScore(widget.score).timeout(const Duration(seconds: 4));
                   } catch (e) {
-                    debugPrint("Score update failed, skipping to exit: $e");
+                    debugPrint("Score update failed: $e");
                   } finally {
-                    widget.onLoseLife();
+                    // 🎯 3. CHAWAL FIXED: Ab widget.onLoseLife() ki jagah direct custom exit callback chalega
+                    widget.onExitPressed();
                   }
                 },
                 child: Text(

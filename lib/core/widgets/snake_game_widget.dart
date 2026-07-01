@@ -10,8 +10,9 @@ class Food {
   final int type;
   final Color color;
   final bool isLoot;
+  double opacity;
 
-  Food(this.pos, this.type, this.color, {this.isLoot = false});
+  Food(this.pos, this.type, this.color, {this.isLoot = false, this.opacity = 1.0});
 }
 
 class NPCSnake {

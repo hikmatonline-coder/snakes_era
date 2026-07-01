@@ -6,6 +6,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 
 import '../core/constants.dart';
+import '../services/notification_services.dart';
 
 class LifeProvider with ChangeNotifier {
   final _storage = const FlutterSecureStorage();
@@ -80,6 +81,11 @@ class LifeProvider with ChangeNotifier {
       _checkRegen();
       await _clearLocalLifeStorage();
       _remoteLoaded = true;
+
+      // 🎯 Safe Check: Agar data load hone par lives already full hain, to pending notification hata do
+      if (_lives >= AppConstants.maxLives) {
+        NotificationService().cancel(NotificationService.idLivesFull);
+      }
     } catch (e) {
       debugPrint('Failed to load lives from Firestore: $e');
       await _migrateFromLocalStorage();
@@ -106,7 +112,6 @@ class LifeProvider with ChangeNotifier {
   }
 
   void _applyMaxLivesCapOnLoad() {
-    // Natural regen cap is maxLives; reward overfill above cap is kept.
     if (_lives > AppConstants.maxLives && _lives <= 7) {
       _lives = AppConstants.maxLives;
     }
@@ -151,6 +156,11 @@ class LifeProvider with ChangeNotifier {
       _lives = (_lives + livesToGain).clamp(0, AppConstants.maxLives);
       _lastRegen = now.subtract(Duration(seconds: difference % AppConstants.lifeRegenSeconds));
       _saveState();
+
+      // 🎯 Check if lives became full after this incremental step
+      if (_lives >= AppConstants.maxLives) {
+        NotificationService().cancel(NotificationService.idLivesFull);
+      }
     }
   }
 
@@ -159,6 +169,11 @@ class LifeProvider with ChangeNotifier {
 
     if (_lives >= AppConstants.maxLives) {
       _lastRegen = null;
+      // 🎯 Health full ho chuki hy, kisi notification ki zaroorat nahi abhi
+      NotificationService().cancel(NotificationService.idLivesFull);
+    } else {
+      // Remaining recovery duration re-schedule karein
+      _scheduleRechargeNotification();
     }
 
     _saveState();
@@ -172,10 +187,33 @@ class LifeProvider with ChangeNotifier {
       }
       _lives--;
       await _saveState();
+
+      // 🎯 Jab bhi life use ho, calculated delay ke sath notification throw karo
+      _scheduleRechargeNotification();
+
       notifyListeners();
       return true;
     }
     return false;
+  }
+
+  // 🎯 HELPER TO CALCULATE AND SCHEDULE LIVES REMINDER
+  void _scheduleRechargeNotification() {
+    if (_lives >= AppConstants.maxLives) return;
+
+    // Har missing life ka delta convert karein seconds mein
+    int missingLives = AppConstants.maxLives - _lives;
+    int secondsToFull = (missingLives * AppConstants.lifeRegenSeconds);
+
+    // Pehle segment ka calculated duration minus karein jo timer already chal chuka hy
+    if (_lastRegen != null) {
+      final elapsed = DateTime.now().difference(_lastRegen!).inSeconds;
+      secondsToFull -= elapsed;
+    }
+
+    if (secondsToFull > 0) {
+      NotificationService().scheduleLivesFull(Duration(seconds: secondsToFull));
+    }
   }
 
   Future<void> _saveState() async {
@@ -197,6 +235,7 @@ class LifeProvider with ChangeNotifier {
     _lives = AppConstants.maxLives;
     _lastRegen = null;
     _remoteLoaded = false;
+    NotificationService().cancel(NotificationService.idLivesFull);
     notifyListeners();
   }
 
