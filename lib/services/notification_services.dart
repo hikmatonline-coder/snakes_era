@@ -174,6 +174,17 @@ class NotificationService {
     );
   }
 
+  void scheduleLivesFull(Duration delay) {
+    final randomData = _livesFullStrings[Random().nextInt(_livesFullStrings.length)];
+    _schedule(
+      id: idLivesFull,
+      title: randomData["title"]!,
+      body: randomData["body"]!,
+      delay: delay,
+      channelId: 'lives_channel',
+      channelName: 'Life System Alerts',
+    );
+  }
 
   void scheduleInactivityReminder() {
     final randomData = _inactivityStrings[Random().nextInt(_inactivityStrings.length)];
