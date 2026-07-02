@@ -3,14 +3,40 @@ import 'dart:math';
 import 'package:flutter/material.dart';
 import '../core/widgets/snake_game_widget.dart';
 
+class LeaderboardEntry {
+  final String name;
+  final int score;
+  final bool isPlayer;
+
+  const LeaderboardEntry({
+    required this.name,
+    required this.score,
+    required this.isPlayer,
+  });
+}
+
+class CrownTarget {
+  final Offset pos;
+  final int length;
+  final bool isPlayer;
+  final NPCSize? npcSize;
+
+  const CrownTarget({
+    required this.pos,
+    required this.length,
+    required this.isPlayer,
+    this.npcSize,
+  });
+}
+
 class SnakeGameProvider with ChangeNotifier {
-  // --- Constants ---
   final double worldSize = 6000.0;
   final double chunkSize = 500.0;
   final double baseSnakeSpeed = 3.5;
   final double spacing = 5.0;
 
-  // --- State Variables ---
+  final ValueNotifier<int> frameNotifier = ValueNotifier(0);
+
   Offset playerPos = const Offset(3000, 3000);
   double playerAngle = 0.0;
   double targetAngle = 0.0;
@@ -31,30 +57,44 @@ class SnakeGameProvider with ChangeNotifier {
   bool isPaused = false;
   int frameCounter = 0;
 
+  List<LeaderboardEntry> leaderboardEntries = const [];
+  List<CrownTarget> crownTargets = const [];
+
   int adsWatchedThisSession = 0;
   final int maxAdsPerSession = 3;
   bool isScoreDoubled = false;
 
-  // --- NEW: TICKETS MILESTONE SYSTEM VARIABLES ---
   int milestonesClaimedDuringGame = 0;
-  int ticketsAwardedSoFar = 0; // Tracks all tickets awarded during this match session
-  Function(int tickets, String message)? onLiveTicketsRewarded; // Callback for UI popups
+  int ticketsAwardedSoFar = 0;
+  Function(int tickets, String message)? onLiveTicketsRewarded;
 
-  Timer? gameTimer;
-  DateTime _lastTick = DateTime.now();
   late List<Color> activeSkinColors;
-  final List<String> botNames = ["Dragon", "Shadow", "Mamba", "Alpha", "Neon", "Viper", "Hunter", "Swift", "Venom", "Bolt"];
+  final List<String> botNames = [
+    'Dragon',
+    'Shadow',
+    'Mamba',
+    'Alpha',
+    'Neon',
+    'Viper',
+    'Hunter',
+    'Swift',
+    'Venom',
+    'Bolt',
+  ];
 
-  // --- Core Lifecycle ---
-  // CHANGE: Added optional live reward callback hook
-  void startGame(List<Color> skinColors, {Function(int, String)? onLiveTicketsRewarded}) {
+  final List<Food> _foodQueryBuffer = [];
+  final Random _rng = Random();
+
+  void startGame(
+    List<Color> skinColors, {
+    Function(int, String)? onLiveTicketsRewarded,
+  }) {
     this.onLiveTicketsRewarded = onLiveTicketsRewarded;
     activeSkinColors = skinColors;
     resetGame();
   }
 
   void resetGame() {
-    gameTimer?.cancel();
     playerPos = const Offset(3000, 3000);
     playerBody = List.generate(20, (i) => Offset(3000.0, 3000.0 + (i * spacing)));
     isPaused = false;
@@ -66,8 +106,8 @@ class SnakeGameProvider with ChangeNotifier {
     isGameOver = false;
     isBoosting = false;
     isInvincible = false;
+    frameCounter = 0;
 
-    // Reset ticket engine counters
     milestonesClaimedDuringGame = 0;
     ticketsAwardedSoFar = 0;
 
@@ -77,19 +117,15 @@ class SnakeGameProvider with ChangeNotifier {
 
     _spawnFood(1500);
     _spawnNPCs(40);
-
-    _lastTick = DateTime.now();
-    gameTimer = Timer.periodic(const Duration(milliseconds: 16), (timer) => _gameTick());
+    _refreshHudCaches();
+    frameNotifier.value = 0;
     notifyListeners();
   }
 
-  // 🎯 DYNAMIC CLEAN EXIT ENGINE (Call this when user explicitly exits to Home)
   void stopGameEngine() {
-    gameTimer?.cancel();
-    gameTimer = null;
-    isGameOver = true; // Taake koi tickers ya UI update background mein na chale
+    isGameOver = true;
     isPaused = false;
-    onLiveTicketsRewarded = null; // Callback remove karein memory leaks se bachne ke liye
+    onLiveTicketsRewarded = null;
     notifyListeners();
   }
 
@@ -101,111 +137,117 @@ class SnakeGameProvider with ChangeNotifier {
     }
   }
 
-  // --- Spatial Hashing (Chunks Management) ---
   String getChunkKey(Offset pos) {
-    int x = (pos.dx / chunkSize).floor();
-    int y = (pos.dy / chunkSize).floor();
-    return "$x,$y";
+    final x = (pos.dx / chunkSize).floor();
+    final y = (pos.dy / chunkSize).floor();
+    return '$x,$y';
   }
 
   void _addNewFood(Food f) {
     foods.add(f);
-    String key = getChunkKey(f.pos);
+    final key = getChunkKey(f.pos);
     chunkedFoods.putIfAbsent(key, () => []).add(f);
   }
 
   void _removeFood(Food f) {
     foods.remove(f);
-    String key = getChunkKey(f.pos);
-    if (chunkedFoods.containsKey(key)) {
-      chunkedFoods[key]!.remove(f);
-    }
-    for (var list in chunkedFoods.values) {
-      list.remove(f);
+    final key = getChunkKey(f.pos);
+    chunkedFoods[key]?.remove(f);
+  }
+
+  void _collectNearbyFood(
+    Offset pos,
+    List<Food> buffer, {
+    int chunkRadius = 1,
+  }) {
+    buffer.clear();
+    final cx = (pos.dx / chunkSize).floor();
+    final cy = (pos.dy / chunkSize).floor();
+
+    for (int x = cx - chunkRadius; x <= cx + chunkRadius; x++) {
+      for (int y = cy - chunkRadius; y <= cy + chunkRadius; y++) {
+        final chunk = chunkedFoods['$x,$y'];
+        if (chunk != null) {
+          buffer.addAll(chunk);
+        }
+      }
     }
   }
 
-  // --- Spawning Logic ---
   void _spawnFood(int count) {
-    var rng = Random();
     for (int i = 0; i < count; i++) {
-      bool isSmall = rng.nextDouble() < 0.8;
-      Food newFood = Food(
-          Offset(rng.nextDouble() * worldSize, rng.nextDouble() * worldSize),
+      final isSmall = _rng.nextDouble() < 0.8;
+      _addNewFood(
+        Food(
+          Offset(_rng.nextDouble() * worldSize, _rng.nextDouble() * worldSize),
           isSmall ? 0 : 1,
-          Colors.primaries[rng.nextInt(Colors.primaries.length)],
-          isLoot: false
+          Colors.primaries[_rng.nextInt(Colors.primaries.length)],
+        ),
       );
-      _addNewFood(newFood);
     }
   }
 
   void _ejectBoostFood() {
     if (playerBody.length < 5) return;
 
-    var rng = Random();
-    Offset tail = playerBody.last;
-    Offset prevTail = playerBody[playerBody.length - 2];
+    final tail = playerBody.last;
+    final prevTail = playerBody[playerBody.length - 2];
 
-    Offset directionAway = (tail - prevTail);
+    var directionAway = tail - prevTail;
     if (directionAway.distance == 0) directionAway = const Offset(1, 0);
 
-    Offset spawnPos = tail + (directionAway / directionAway.distance) * 25.0;
+    final spawnPos = tail + (directionAway / directionAway.distance) * 25.0;
 
-    Food boostLoot = Food(
-      spawnPos + Offset(rng.nextDouble() * 10 - 5, rng.nextDouble() * 10 - 5),
-      0,
-      activeSkinColors[0],
-      isLoot: true,
+    _addNewFood(
+      Food(
+        spawnPos +
+            Offset(_rng.nextDouble() * 10 - 5, _rng.nextDouble() * 10 - 5),
+        0,
+        activeSkinColors[0],
+        isLoot: true,
+      ),
     );
-    _addNewFood(boostLoot);
   }
 
   void _handleSnakeDeath(List<Offset> bodySegments, List<Color> snakeColors) {
-    var rng = Random();
-    List<Food> npcLootItems = [];
+    final npcLootItems = <Food>[];
+    const premiumColors = [
+      Color(0xFFFF5E7E),
+      Color(0xFF00F5D4),
+      Color(0xFF7B2CBF),
+      Color(0xFFFFB703),
+      Color(0xFF9EF01A),
+      Color(0xFF4CC9F0),
+    ];
 
     for (int i = 0; i < bodySegments.length; i += 3) {
-      Offset segmentPos = bodySegments[i];
+      final segmentPos = bodySegments[i];
+      final foodColor = premiumColors[_rng.nextInt(premiumColors.length)];
 
-      // 🎨 Premium Candy Pastel Colors (Jo aankhon ko chubhain gey nahi)
-      List<Color> premiumColors = [
-        const Color(0xFFFF5E7E), // Soft Candy Pink
-        const Color(0xFF00F5D4), // Premium Mint/Teal
-        const Color(0xFF7B2CBF), // Deep Royal Purple
-        const Color(0xFFFFB703), // Juicy Mango Orange
-        const Color(0xFF9EF01A), // Electric Lime Green
-        const Color(0xFF4CC9F0), // Sky Neon Blue
-      ];
-      Color foodColor = premiumColors[rng.nextInt(premiumColors.length)];
-
-      Food deathLoot1 = Food(segmentPos, 2, foodColor, isLoot: true);
+      final deathLoot1 = Food(segmentPos, 2, foodColor, isLoot: true);
       _addNewFood(deathLoot1);
       npcLootItems.add(deathLoot1);
 
-      Offset tightOffset = Offset(
-        (rng.nextDouble() - 0.5) * 15,
-        (rng.nextDouble() - 0.5) * 15,
+      final tightOffset = Offset(
+        (_rng.nextDouble() - 0.5) * 15,
+        (_rng.nextDouble() - 0.5) * 15,
       );
 
-      Food deathLoot2 = Food(segmentPos + tightOffset, 2, foodColor, isLoot: true);
+      final deathLoot2 = Food(segmentPos + tightOffset, 2, foodColor, isLoot: true);
       _addNewFood(deathLoot2);
       npcLootItems.add(deathLoot2);
     }
 
-    // 🕒 STEP 1: Pehle 7 seconds tak BILKUL NO BLINK (Skoon se loot parhi rahegi)
     Timer(const Duration(seconds: 7), () {
-      int pulseCount = 0;
+      var pulseCount = 0;
 
-      // 🎯 STEP 2: Last 3 seconds mein (3000ms / 200ms = 15 pulses) blink engine start hoga
       Timer.periodic(const Duration(milliseconds: 200), (blinkTimer) {
         pulseCount++;
 
         if (pulseCount >= 15) {
           blinkTimer.cancel();
 
-          // Match end par bacha hua loot saaf karein
-          for (var lootItem in npcLootItems) {
+          for (final lootItem in npcLootItems) {
             if (foods.contains(lootItem)) {
               _removeFood(lootItem);
             }
@@ -215,32 +257,28 @@ class SnakeGameProvider with ChangeNotifier {
           return;
         }
 
-        // Sirf in aakhri 3 seconds mein state toggle hogi tick-tick kar ke
         isLootBlinkingState = !isLootBlinkingState;
         notifyListeners();
       });
     });
   }
 
-  // --- Game Loop ---
-  void _gameTick() {
+  void tick(double dt) {
     if (isGameOver || isPaused) return;
 
-    final now = DateTime.now();
-    final double dt = now.difference(_lastTick).inMicroseconds / 1000000.0;
-    double cappedDt = dt.clamp(0.0, 0.03);
-    _lastTick = now;
-
+    final cappedDt = dt.clamp(0.0, 0.03);
     frameCounter++;
+
     _movePlayerLogic(cappedDt);
 
-    if (isBoosting && playerBody.length > 15) {
-      if (frameCounter % 8 == 0) {
-        _ejectBoostFood();
-        fractionalLength -= 0.15;
-        currentLengthLimit = max(15, fractionalLength.toInt());
-        if (score > 0) score -= 1;
+    if (isBoosting && playerBody.length > 15 && frameCounter % 8 == 0) {
+      _ejectBoostFood();
+      fractionalLength -= 0.15;
+      final newLimit = max(15, fractionalLength.toInt());
+      if (newLimit != currentLengthLimit) {
+        currentLengthLimit = newLimit;
       }
+      if (score > 0) score -= 1;
     }
 
     _applyFoodMagnet(cappedDt);
@@ -249,35 +287,89 @@ class SnakeGameProvider with ChangeNotifier {
       _checkCollisions();
     }
 
-    for (var npc in npcs) {
+    for (final npc in npcs) {
       npc.move(npc.isBoosting ? 5.0 : 3.2, cappedDt);
     }
 
-    int npcsToUpdate = (npcs.length / 2).ceil();
+    final npcsToUpdate = (npcs.length / 2).ceil();
     for (int i = 0; i < npcsToUpdate; i++) {
-      int index = (frameCounter * npcsToUpdate + i) % npcs.length;
+      final index = (frameCounter * npcsToUpdate + i) % npcs.length;
       if (index < npcs.length) {
-        npcs[index].think(playerBody, npcs, foods, worldSize);
+        npcs[index].think(
+          playerBody,
+          npcs,
+          chunkedFoods,
+          chunkSize,
+          worldSize,
+          _foodQueryBuffer,
+        );
       }
     }
 
-    notifyListeners();
+    frameNotifier.value = frameCounter;
+
+    if (frameCounter % 20 == 0) {
+      _refreshHudCaches();
+      notifyListeners();
+    }
+  }
+
+  void _refreshHudCaches() {
+    final entries = <LeaderboardEntry>[
+      LeaderboardEntry(
+        name: 'YOU',
+        score: currentLengthLimit,
+        isPlayer: true,
+      ),
+      ...npcs.map(
+        (n) => LeaderboardEntry(
+          name: n.name,
+          score: n.length,
+          isPlayer: false,
+        ),
+      ),
+    ]..sort((a, b) => b.score.compareTo(a.score));
+
+    leaderboardEntries = entries;
+
+    final crownCandidates = <CrownTarget>[
+      CrownTarget(
+        pos: playerPos,
+        length: playerBody.length,
+        isPlayer: true,
+      ),
+      ...npcs.map(
+        (npc) => CrownTarget(
+          pos: npc.pos,
+          length: npc.body.length,
+          isPlayer: false,
+          npcSize: npc.size,
+        ),
+      ),
+    ]..sort((a, b) => b.length.compareTo(a.length));
+
+    crownTargets = crownCandidates.take(3).toList();
   }
 
   void _checkCollisions() {
     if (isGameOver) return;
 
-    // 1. BORDER CHECK
-    final double borderPadding = 60.0;
+    const borderPadding = 60.0;
 
-    if (playerPos.dx < borderPadding || playerPos.dx > (worldSize - borderPadding) ||
-        playerPos.dy < borderPadding || playerPos.dy > (worldSize - borderPadding)) {
-
+    if (playerPos.dx < borderPadding ||
+        playerPos.dx > (worldSize - borderPadding) ||
+        playerPos.dy < borderPadding ||
+        playerPos.dy > (worldSize - borderPadding)) {
       if (isInvincible) {
-        // Invincible state mein saanp border ke andar safely clamp rahega
         playerPos = Offset(
-            playerPos.dx.clamp(borderPadding + 10.0, worldSize - borderPadding - 10.0),
-            playerPos.dy.clamp(borderPadding + 10.0, worldSize - borderPadding - 10.0)
+          playerPos.dx.clamp(
+            borderPadding + 10.0,
+            worldSize - borderPadding - 10.0,
+          ),
+          playerPos.dy.clamp(
+            borderPadding + 10.0,
+            worldSize - borderPadding - 10.0,
+          ),
         );
         playerBody[0] = playerPos;
       } else {
@@ -287,24 +379,15 @@ class SnakeGameProvider with ChangeNotifier {
       }
     }
 
-    // 2. BOT FOOD INTERACTION SYSTEM (UPDATED WITH RANK-BASED GROWTH MULTIPLIER)
-    for (var npc in npcs) {
-      int nX = (npc.pos.dx / chunkSize).floor();
-      int nY = (npc.pos.dy / chunkSize).floor();
-      List<Food> localFood = [];
+    for (final npc in npcs) {
+      _collectNearbyFood(npc.pos, _foodQueryBuffer);
 
-      for (int x = nX - 1; x <= nX + 1; x++) {
-        for (int y = nY - 1; y <= nY + 1; y++) {
-          var chunk = chunkedFoods["$x,$y"];
-          if (chunk != null) localFood.addAll(chunk);
-        }
-      }
-
-      double npcHeadRadius = 10.0 + (npc.body.length / 100).clamp(0, 15);
+      final npcHeadRadius = 10.0 + (npc.body.length / 100).clamp(0, 15);
+      final eatRadiusSq = (npcHeadRadius + 5) * (npcHeadRadius + 5);
       Food? foodToEat;
 
-      for (var f in localFood) {
-        if ((npc.pos - f.pos).distance < npcHeadRadius + 5) {
+      for (final f in _foodQueryBuffer) {
+        if ((npc.pos - f.pos).distanceSquared < eatRadiusSq) {
           foodToEat = f;
           break;
         }
@@ -313,10 +396,7 @@ class SnakeGameProvider with ChangeNotifier {
       if (foodToEat != null && foods.contains(foodToEat)) {
         _removeFood(foodToEat);
 
-        // 🚀 SMART ACCELERATED GROWTH SYSTEM
-        int baseGrowth = foodToEat.isLoot ? 3 : 1;
-
-        // Higher rank bots consume food with greater efficiency to dominate leaderboard
+        var baseGrowth = foodToEat.isLoot ? 3 : 1;
         if (npc.rank == NPCType.legend) {
           baseGrowth = foodToEat.isLoot ? 6 : 3;
         } else if (npc.rank == NPCType.pro) {
@@ -327,22 +407,14 @@ class SnakeGameProvider with ChangeNotifier {
       }
     }
 
-    // 3. HUMAN PLAYER COLLISION SWEEP
-    int pX = (playerPos.dx / chunkSize).floor();
-    int pY = (playerPos.dy / chunkSize).floor();
-    List<Food> playerLocalFood = [];
-    for (int x = pX - 1; x <= pX + 1; x++) {
-      for (int y = pY - 1; y <= pY + 1; y++) {
-        var chunk = chunkedFoods["$x,$y"];
-        if (chunk != null) playerLocalFood.addAll(chunk);
-      }
-    }
+    _collectNearbyFood(playerPos, _foodQueryBuffer);
 
-    double playerHeadRadius = 12.0 + (playerBody.length / 120).clamp(0, 10);
+    final playerHeadRadius = 12.0 + (playerBody.length / 120).clamp(0, 10);
+    final playerEatRadiusSq = playerHeadRadius * playerHeadRadius;
     Food? playerFoodToEat;
 
-    for (var f in playerLocalFood) {
-      if ((playerPos - f.pos).distance < playerHeadRadius) {
+    for (final f in _foodQueryBuffer) {
+      if ((playerPos - f.pos).distanceSquared < playerEatRadiusSq) {
         playerFoodToEat = f;
         break;
       }
@@ -352,20 +424,22 @@ class SnakeGameProvider with ChangeNotifier {
       _processFoodConsumption(playerFoodToEat);
     }
 
-    // 4. COMBAT COMBINATORICS
-    Set<NPCSnake> deadNPCsLocal = {};
+    final deadNPCsLocal = <NPCSnake>{};
+    const hitRadiusSq = 16.0 * 16.0;
 
-    for (var npc in npcs) {
-      bool npcDied = false;
+    for (final npc in npcs) {
+      var npcDied = false;
 
-      if (npc.pos.dx < borderPadding || npc.pos.dx > worldSize - borderPadding ||
-          npc.pos.dy < borderPadding || npc.pos.dy > worldSize - borderPadding) {
+      if (npc.pos.dx < borderPadding ||
+          npc.pos.dx > worldSize - borderPadding ||
+          npc.pos.dy < borderPadding ||
+          npc.pos.dy > worldSize - borderPadding) {
         npcDied = true;
       }
 
       if (!npcDied) {
-        for (var segment in playerBody.skip(3)) {
-          if ((npc.pos - segment).distance < 16) {
+        for (final segment in playerBody.skip(3)) {
+          if ((npc.pos - segment).distanceSquared < hitRadiusSq) {
             npcDied = true;
             break;
           }
@@ -373,12 +447,12 @@ class SnakeGameProvider with ChangeNotifier {
       }
 
       if (!npcDied) {
-        for (var otherNpc in npcs) {
+        for (final otherNpc in npcs) {
           if (identical(npc, otherNpc)) continue;
-          if ((npc.pos - otherNpc.pos).distance > 300) continue;
+          if ((npc.pos - otherNpc.pos).distanceSquared > 90000) continue;
 
-          for (var segment in otherNpc.body.skip(2)) {
-            if ((npc.pos - segment).distance < 16) {
+          for (final segment in otherNpc.body.skip(2)) {
+            if ((npc.pos - segment).distanceSquared < hitRadiusSq) {
               npcDied = true;
               break;
             }
@@ -390,18 +464,17 @@ class SnakeGameProvider with ChangeNotifier {
       if (npcDied) deadNPCsLocal.add(npc);
     }
 
-    for (var npc in deadNPCsLocal) {
+    for (final npc in deadNPCsLocal) {
       _handleSnakeDeath(npc.body, npc.colors);
       npcs.remove(npc);
       _spawnSingleNPC();
     }
 
-    // 5. HUMAN CASUALTY CHECKER
     if (!isInvincible) {
-      for (var npc in npcs) {
-        if ((playerPos - npc.pos).distance > 400) continue;
-        for (var segment in npc.body.skip(1)) {
-          if ((playerPos - segment).distance < 16) {
+      for (final npc in npcs) {
+        if ((playerPos - npc.pos).distanceSquared > 160000) continue;
+        for (final segment in npc.body.skip(1)) {
+          if ((playerPos - segment).distanceSquared < hitRadiusSq) {
             _handleSnakeDeath(playerBody, activeSkinColors);
             _endGame();
             return;
@@ -414,20 +487,21 @@ class SnakeGameProvider with ChangeNotifier {
   }
 
   void _movePlayerLogic(double dt) {
-    double agility = (1.0 - (playerBody.length / 3000)).clamp(0.40, 1.0);
-    double diff = targetAngle - playerAngle;
+    final agility = (1.0 - (playerBody.length / 3000)).clamp(0.40, 1.0);
+    var diff = targetAngle - playerAngle;
     while (diff < -pi) diff += 2 * pi;
     while (diff > pi) diff -= 2 * pi;
 
     playerAngle += diff * (11.0 * agility * dt);
 
-    // 🎯 FIX: Speed Drop Mechanism Smooth Kar Diya
-    // Pehle max 35% speed drop ho rahi thi aur factor tezi se gir raha tha.
-    // Ab base speed ka structure thora tweak kiya hy taake bada saanp decent speed maintain kare.
-    double speedMultiplier = 1.0 - (playerBody.length / 6000).clamp(0.0, 0.20); // Max 20% drop hoga, 35% nahi
-    double moveSpeed = (isBoosting ? 400.0 : 240.0) * speedMultiplier; // Base speed thori barha di hy balance ke liye
+    final speedMultiplier =
+        1.0 - (playerBody.length / 6000).clamp(0.0, 0.20);
+    final moveSpeed = (isBoosting ? 400.0 : 240.0) * speedMultiplier;
 
-    playerPos += Offset(cos(playerAngle) * moveSpeed * dt, sin(playerAngle) * moveSpeed * dt);
+    playerPos += Offset(
+      cos(playerAngle) * moveSpeed * dt,
+      sin(playerAngle) * moveSpeed * dt,
+    );
 
     if (playerBody.isEmpty) {
       playerBody.add(playerPos);
@@ -437,12 +511,12 @@ class SnakeGameProvider with ChangeNotifier {
     playerBody[0] = playerPos;
 
     for (int i = 1; i < playerBody.length; i++) {
-      Offset prev = playerBody[i - 1];
-      Offset current = playerBody[i];
-      double segmentDist = (prev - current).distance;
+      final prev = playerBody[i - 1];
+      final current = playerBody[i];
+      final segmentDist = (prev - current).distance;
 
       if (segmentDist > spacing) {
-        Offset direction = (prev - current) / segmentDist;
+        final direction = (prev - current) / segmentDist;
         playerBody[i] = prev - (direction * spacing);
       }
     }
@@ -452,39 +526,36 @@ class SnakeGameProvider with ChangeNotifier {
     }
 
     if (playerBody.length > currentLengthLimit) {
-      playerBody = playerBody.sublist(0, currentLengthLimit);
+      playerBody.removeRange(currentLengthLimit, playerBody.length);
     }
   }
 
   void _applyFoodMagnet(double dt) {
     if (isGameOver || isPaused) return;
 
-    int pX = (playerPos.dx / chunkSize).floor();
-    int pY = (playerPos.dy / chunkSize).floor();
+    final pX = (playerPos.dx / chunkSize).floor();
+    final pY = (playerPos.dy / chunkSize).floor();
 
     for (int x = pX - 1; x <= pX + 1; x++) {
       for (int y = pY - 1; y <= pY + 1; y++) {
-        var chunk = chunkedFoods["$x,$y"];
+        final chunk = chunkedFoods['$x,$y'];
         if (chunk == null) continue;
 
         for (int i = chunk.length - 1; i >= 0; i--) {
-          var food = chunk[i];
-          if (food.isLoot) {
-            double dist = (playerPos - food.pos).distance;
+          final food = chunk[i];
+          if (!food.isLoot) continue;
 
-            if (dist < 75.0) {
-              String oldKey = getChunkKey(food.pos);
+          final dist = (playerPos - food.pos).distance;
+          if (dist < 75.0) {
+            final oldKey = getChunkKey(food.pos);
+            final pullSpeed = (75.0 - dist) * 6.0 * dt;
+            final direction = (playerPos - food.pos) / dist;
+            food.pos += direction * pullSpeed;
 
-              double pullSpeed = (75.0 - dist) * 6.0 * dt;
-              Offset direction = (playerPos - food.pos) / dist;
-              food.pos += direction * pullSpeed;
-
-              String newKey = getChunkKey(food.pos);
-
-              if (oldKey != newKey) {
-                chunkedFoods[oldKey]?.remove(food);
-                chunkedFoods.putIfAbsent(newKey, () => []).add(food);
-              }
+            final newKey = getChunkKey(food.pos);
+            if (oldKey != newKey) {
+              chunkedFoods[oldKey]?.remove(food);
+              chunkedFoods.putIfAbsent(newKey, () => []).add(food);
             }
           }
         }
@@ -492,7 +563,6 @@ class SnakeGameProvider with ChangeNotifier {
     }
   }
 
-  // --- SCORE & PLAYER GROWTH CONTROL ---
   void _processFoodConsumption(Food f) {
     _removeFood(f);
 
@@ -504,39 +574,40 @@ class SnakeGameProvider with ChangeNotifier {
       score += 3;
     }
 
-    // --- NEW: IN-GAME MILESTONE ENGINE INTEGRATION ---
-    int expectedMilestones = score ~/ 1000;
+    final expectedMilestones = score ~/ 1000;
     if (expectedMilestones > milestonesClaimedDuringGame) {
-      int newMilestonesHit = expectedMilestones - milestonesClaimedDuringGame;
+      final newMilestonesHit =
+          expectedMilestones - milestonesClaimedDuringGame;
       milestonesClaimedDuringGame = expectedMilestones;
 
-      int liveTickets = newMilestonesHit * 10;
+      final liveTickets = newMilestonesHit * 10;
       ticketsAwardedSoFar += liveTickets;
-
-      // Trigger live callback ui toast if configured
-      onLiveTicketsRewarded?.call(liveTickets, "💥 AMAZING! +$liveTickets Live Tickets Added!");
+      onLiveTicketsRewarded?.call(
+        liveTickets,
+        '💥 AMAZING! +$liveTickets Live Tickets Added!',
+      );
     }
 
-    double efficiency = 1.0 / (1.0 + (playerBody.length / 600));
+    final efficiency = 1.0 / (1.0 + (playerBody.length / 600));
+    final baseGrowth = f.isLoot ? 0.334 : 0.20;
+    fractionalLength += baseGrowth * efficiency;
 
-    // 🎯 FIX: 3:1 Ratio for Trial Loot Growth
-    // Agar loot hy to base growth 0.334 rakhi hy, taake exact 3 loot par 1 segment barhay (0.334 * 3 = 1.002 -> 1)
-    double baseGrowth = f.isLoot ? 0.334 : 0.20;
-    double growth = baseGrowth * efficiency;
+    final newLimit = fractionalLength.toInt();
+    if (newLimit != currentLengthLimit) {
+      currentLengthLimit = newLimit;
+    }
 
-    fractionalLength += growth;
-    currentLengthLimit = fractionalLength.toInt();
+    notifyListeners();
   }
 
-  // --- NEW: DYNAMIC END GAME CALCULATIONS ENGINE ---
   int getRemainingTickets() {
-    int totalDeservedTickets = score ~/ 100; // 100 score = 1 ticket
-    int rem = totalDeservedTickets - ticketsAwardedSoFar;
+    final totalDeservedTickets = score ~/ 100;
+    final rem = totalDeservedTickets - ticketsAwardedSoFar;
     return rem < 0 ? 0 : rem;
   }
 
   void finalizeAndClaimRemainingTickets(Function(int) addTicketsCallback) {
-    int remaining = getRemainingTickets();
+    final remaining = getRemainingTickets();
     if (remaining > 0) {
       ticketsAwardedSoFar += remaining;
       addTicketsCallback(remaining);
@@ -545,110 +616,111 @@ class SnakeGameProvider with ChangeNotifier {
   }
 
   void _spawnSingleNPC() {
-    var rng = Random();
     Offset spawnPos;
     do {
-      spawnPos = Offset(rng.nextDouble() * (worldSize - 200) + 100, rng.nextDouble() * (worldSize - 200) + 100);
-    } while ((spawnPos - playerPos).distance < 700); // Player ke bilkul sar par spawn na ho
+      spawnPos = Offset(
+        _rng.nextDouble() * (worldSize - 200) + 100,
+        _rng.nextDouble() * (worldSize - 200) + 100,
+      );
+    } while ((spawnPos - playerPos).distance < 700);
 
-    String name = botNames[rng.nextInt(botNames.length)];
-    String uniqueName = "$name#${rng.nextInt(99)}";
+    var name = botNames[_rng.nextInt(botNames.length)];
+    var uniqueName = '$name#${_rng.nextInt(99)}';
 
-    int initialLength;
-    NPCType rank;
-    NPCSize sizeCategory;
+    late int initialLength;
+    late NPCType rank;
+    late NPCSize sizeCategory;
 
-    double chance = rng.nextDouble();
+    final chance = _rng.nextDouble();
 
     if (chance < 0.08) {
-      // 8% chance ke Legend bot respawn ho
-      initialLength = rng.nextInt(50) + 120;
+      initialLength = _rng.nextInt(50) + 120;
       rank = NPCType.legend;
       sizeCategory = NPCSize.xlarge;
-      uniqueName = "👑 $name [LEGEND]";
+      uniqueName = '👑 $name [LEGEND]';
     } else if (chance < 0.28) {
-      // 20% chance ke Pro bot respawn ho
-      initialLength = rng.nextInt(40) + 70;
+      initialLength = _rng.nextInt(40) + 70;
       rank = NPCType.pro;
       sizeCategory = NPCSize.large;
-      uniqueName = "🔥 $name [PRO]";
+      uniqueName = '🔥 $name [PRO]';
     } else if (chance < 0.65) {
-      // 37% chance ke Medium Beginner bot ho
-      initialLength = rng.nextInt(20) + 35;
+      initialLength = _rng.nextInt(20) + 35;
       rank = NPCType.beginner;
       sizeCategory = NPCSize.medium;
     } else {
-      // Remaining 35% Normal small bot
-      initialLength = rng.nextInt(15) + 15;
+      initialLength = _rng.nextInt(15) + 15;
       rank = NPCType.noob;
       sizeCategory = NPCSize.small;
     }
 
-    npcs.add(NPCSnake(
+    npcs.add(
+      NPCSnake(
         spawnPos,
         initialLength,
-        [Colors.primaries[rng.nextInt(Colors.primaries.length)], Colors.white],
+        [
+          Colors.primaries[_rng.nextInt(Colors.primaries.length)],
+          Colors.white,
+        ],
         rank,
         uniqueName,
-        sizeCategory
-    ));
+        sizeCategory,
+      ),
+    );
   }
 
   void _spawnNPCs(int count) {
-    var rng = Random();
     for (int i = 0; i < count; i++) {
-      Offset spawnPos = Offset(
-          rng.nextDouble() * (worldSize - 400) + 200,
-          rng.nextDouble() * (worldSize - 400) + 200
+      final spawnPos = Offset(
+        _rng.nextDouble() * (worldSize - 400) + 200,
+        _rng.nextDouble() * (worldSize - 400) + 200,
       );
 
-      String name = botNames[rng.nextInt(botNames.length)];
-      String uniqueName = "$name#${rng.nextInt(99)}";
+      final name = botNames[_rng.nextInt(botNames.length)];
+      var uniqueName = '$name#${_rng.nextInt(99)}';
 
-      int initialLength;
-      NPCType rank;
-      NPCSize sizeCategory;
+      late int initialLength;
+      late NPCType rank;
+      late NPCSize sizeCategory;
 
-      // 👑 DYNAMIC SIZE RATIO DISTRIBUTION
       if (i < 2) {
-        // Top 2 Global Boss Snakes (Legendary Status)
-        initialLength = rng.nextInt(80) + 180; // Length: 180 to 260
+        initialLength = _rng.nextInt(80) + 180;
         rank = NPCType.legend;
         sizeCategory = NPCSize.xlarge;
-        uniqueName = "👑 $name [LEGEND]";
-      } else if (i >= 2 && i < 7) {
-        // 5 Aggressive Pro Competitors
-        initialLength = rng.nextInt(50) + 80;   // Length: 80 to 130
+        uniqueName = '👑 $name [LEGEND]';
+      } else if (i < 7) {
+        initialLength = _rng.nextInt(50) + 80;
         rank = NPCType.pro;
         sizeCategory = NPCSize.large;
-        uniqueName = "🔥 $name [PRO]";
-      } else if (i >= 7 && i < 20) {
-        // Mid-tier standard bots
-        initialLength = rng.nextInt(25) + 35;   // Length: 35 to 60
+        uniqueName = '🔥 $name [PRO]';
+      } else if (i < 20) {
+        initialLength = _rng.nextInt(25) + 35;
         rank = NPCType.beginner;
         sizeCategory = NPCSize.medium;
       } else {
-        // Small/Newbie bots
-        initialLength = rng.nextInt(15) + 15;   // Length: 15 to 30
+        initialLength = _rng.nextInt(15) + 15;
         rank = NPCType.noob;
         sizeCategory = NPCSize.small;
       }
 
-      npcs.add(NPCSnake(
+      npcs.add(
+        NPCSnake(
           spawnPos,
           initialLength,
-          [Colors.primaries[rng.nextInt(Colors.primaries.length)], Colors.white],
+          [
+            Colors.primaries[_rng.nextInt(Colors.primaries.length)],
+            Colors.white,
+          ],
           rank,
           uniqueName,
-          sizeCategory
-      ));
+          sizeCategory,
+        ),
+      );
     }
   }
 
   void togglePause() {
     if (isGameOver) return;
     isPaused = !isPaused;
-    if (!isPaused) _lastTick = DateTime.now();
     notifyListeners();
   }
 
@@ -658,19 +730,21 @@ class SnakeGameProvider with ChangeNotifier {
     isInvincible = true;
 
     playerPos = const Offset(3000, 3000);
-    playerBody = List.generate(currentLengthLimit, (i) => const Offset(3000, 3000));
+    playerBody = List.generate(
+      currentLengthLimit,
+      (_) => const Offset(3000, 3000),
+    );
 
     foods = [];
     chunkedFoods = {};
     npcs = [];
     _spawnFood(1500);
     _spawnNPCs(40);
+    frameCounter = 0;
 
     targetAngle = playerAngle;
-    gameTimer?.cancel();
-    _lastTick = DateTime.now();
-    gameTimer = Timer.periodic(const Duration(milliseconds: 16), (timer) => _gameTick());
-
+    _refreshHudCaches();
+    frameNotifier.value = frameCounter;
     notifyListeners();
 
     Timer(const Duration(seconds: 4), () {
@@ -681,14 +755,20 @@ class SnakeGameProvider with ChangeNotifier {
 
   void _endGame() {
     isGameOver = true;
-    gameTimer?.cancel();
     notifyListeners();
   }
 
   void setTargetAngle(double angle) => targetAngle = angle;
 
-  void setBoosting(bool val) { isBoosting = val; notifyListeners(); }
+  void setBoosting(bool val) {
+    if (isBoosting == val) return;
+    isBoosting = val;
+    notifyListeners();
+  }
 
   @override
-  void dispose() { gameTimer?.cancel(); super.dispose(); }
+  void dispose() {
+    frameNotifier.dispose();
+    super.dispose();
+  }
 }

@@ -20,16 +20,13 @@ import 'provider/user_provider.dart';
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
 
-  // Initialize Services in parallel for faster startup
   await Future.wait([
     Firebase.initializeApp(),
     AdsInitializer.instance.initialize(),
   ]);
 
-  // Notification Service initializer
   await NotificationService().initNotification();
 
-  // Starting the App
   runApp(
     MultiProvider(
       providers: [
@@ -56,35 +53,23 @@ class QuantXGame extends StatefulWidget {
 }
 
 class _QuantXGameState extends State<QuantXGame> with WidgetsBindingObserver {
-
   @override
   void initState() {
     super.initState();
-    // 🎯 Lifecycle changes track karne ke liye observer lazmi register hona chahiye
     WidgetsBinding.instance.addObserver(this);
-
-    // Initial permissions trigger karo safely
     _initAppNotificationState();
-
-    // 🔥 REAL TEST: App open hote hi 4 seconds baad direct notification phekega!
-    Future.delayed(const Duration(seconds: 4), () {
-      debugPrint("🚀 [FORCED TEST] Triggering actual leaderboard alert method...");
-
-      // Aap ke exact notification service method ko test ke liye 1 second ke delay par fire kar rahe hain
-      NotificationService().scheduleLeaderboardAlert(const Duration(seconds: 1));
-    });
   }
 
-  // ✅ Async initialization permissions smoothly mangne ke liye
   Future<void> _initAppNotificationState() async {
     try {
-      // User ke samne Android 13+ ka permission pop-up pheko
-      await NotificationService().requestNotificationPermission();
+      final granted = await NotificationService().requestNotificationPermission();
+      if (!granted) {
+        debugPrint('Notification permission not granted.');
+      }
 
-      // Purani background alerts saaf karo
       await _clearActiveNotifications();
     } catch (e) {
-      debugPrint("Notification init error: $e");
+      debugPrint('Notification init error: $e');
     }
   }
 
@@ -98,28 +83,14 @@ class _QuantXGameState extends State<QuantXGame> with WidgetsBindingObserver {
   void didChangeAppLifecycleState(AppLifecycleState state) {
     super.didChangeAppLifecycleState(state);
 
-    debugPrint("🚨 [LIFECYCLE DETECTED]: App state is now -> $state");
-
     if (state == AppLifecycleState.paused) {
-      // 🛑 JAB USER APP BAND KARE (Background mein jaye)
-      debugPrint("📱 App went to background. Scheduling retention alerts...");
-
-      // 1. 24 Ghante baad ka inactivity reminder schedule karein
       NotificationService().scheduleInactivityReminder();
-
-      // 2. Leaderboard par active rakhne ke liye notification lagayein (e.g., 5 seconds baad)
-      NotificationService().scheduleLeaderboardAlert(const Duration(seconds: 5));
-
     } else if (state == AppLifecycleState.resumed) {
-      // 🚀 JAB USER APP WAPIS OPEN KARE (Foreground mein aaye)
-      debugPrint("🎯 App resumed to foreground. Clearing passive alerts...");
       _clearActiveNotifications();
     }
   }
 
-  // Async functions ko safely perform karne ke liye async lagaya hy
   Future<void> _clearActiveNotifications() async {
-    // Jab user active ho jaye, to reminders ko cancel kar dein
     await NotificationService().cancel(NotificationService.idInactivity);
     await NotificationService().cancel(NotificationService.idLeaderboard);
   }

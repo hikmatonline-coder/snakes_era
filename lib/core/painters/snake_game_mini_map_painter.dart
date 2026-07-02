@@ -1,18 +1,26 @@
 import 'package:flutter/material.dart';
-import '../widgets/snake_game_widget.dart';
+import '../../provider/snake_game_provider.dart';
 
 class MinimapPainter extends CustomPainter {
-  final Offset playerPos;
-  final List<NPCSnake> npcs;
-  final double worldSize;
+  MinimapPainter({
+    required Listenable repaint,
+    required this.game,
+  }) : super(repaint: repaint);
 
-  MinimapPainter(this.playerPos, this.npcs, this.worldSize);
+  final SnakeGameProvider game;
+
+  final Paint _playerPaint = Paint()..color = Colors.cyanAccent;
+  final Paint _npcPaint = Paint()..color = Colors.redAccent;
 
   @override
   void paint(Canvas canvas, Size size) {
-    double scale = size.width / worldSize;
-    canvas.drawCircle(playerPos * scale, 2, Paint()..color = Colors.cyanAccent);
-    for (var npc in npcs) canvas.drawCircle(npc.pos * scale, 1.5, Paint()..color = Colors.redAccent);
+    final scale = size.width / game.worldSize;
+    canvas.drawCircle(game.playerPos * scale, 2, _playerPaint);
+    for (final npc in game.npcs) {
+      canvas.drawCircle(npc.pos * scale, 1.5, _npcPaint);
+    }
   }
-  @override bool shouldRepaint(covariant CustomPainter oldDelegate) => true;
+
+  @override
+  bool shouldRepaint(covariant MinimapPainter oldDelegate) => false;
 }
